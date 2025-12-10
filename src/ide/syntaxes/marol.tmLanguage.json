@@ -1,0 +1,482 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Marol",
+  "scopeName": "source.marol",
+  "fileTypes": [
+    "qmrl"
+  ],
+  "patterns": [
+    {
+      "include": "#rust-embedding"
+    },
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#block-definitions"
+    },
+    {
+      "include": "#info-definitions"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#control-flow"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#lambdas"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#field-access"
+    },
+    {
+      "include": "#let-binding"
+    },
+    {
+      "include": "#variables"
+    }
+  ],
+  "repository": {
+    "rust-embedding": {
+      "name": "meta.embedded.rust",
+      "begin": "\\{\\{",
+      "end": "\\}\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.begin.marol"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.end.marol"
+        }
+      },
+      "patterns": [
+        {
+          "include": "source.rust"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.marol",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "block-definitions": {
+      "patterns": [
+        {
+          "name": "meta.block.marol",
+          "begin": "\\b(GateRealization|Transition|Architecture|Arch|Step)\\s*(\\[)",
+          "end": "\\]",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.class.marol"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.marol"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.marol"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#block-contents"
+            }
+          ]
+        }
+      ]
+    },
+    "info-definitions": {
+      "patterns": [
+        {
+          "name": "meta.info.block.marol",
+          "begin": "\\b(RouteInfo|TransitionInfo|ArchInfo|StateInfo)\\s*(:)",
+          "end": "(?=\\b(?:RouteInfo|TransitionInfo|ArchInfo|StateInfo|GateRealization|Transition|Architecture|Arch|Step)\\b|\\z)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.marol"
+            },
+            "2": {
+              "name": "punctuation.separator.colon.marol"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#info-contents"
+            }
+          ]
+        }
+      ]
+    },
+    "block-contents": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#fields"
+        },
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "info-contents": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#struct-def"
+        },
+        {
+          "include": "#fields"
+        },
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "expression": {
+      "patterns": [
+        {
+          "include": "#let-binding"
+        },
+        {
+          "include": "#control-flow"
+        },
+        {
+          "include": "#lambdas"
+        },
+        {
+          "include": "#functions"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#field-access"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#variables"
+        }
+      ]
+    },
+    "fields": {
+      "patterns": [
+        {
+          "match": "\\b(routed_gates|name|data|realize_gate|get_transitions|apply|cost|get_locations|width|height|stack_size|magic_state_qubits|alg_qubits|trap_positions|trap_edges|trap_vertices|succ_rates)\\b",
+          "name": "support.type.property-name.marol"
+        }
+      ]
+    },
+    "struct-def": {
+      "patterns": [
+        {
+          "begin": "\\b(GateRealization|Transition|Arch|State)\\s*(\\{)",
+          "end": "\\}",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.struct.marol"
+            },
+            "2": {
+              "name": "punctuation.section.struct.begin.marol"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.struct.end.marol"
+            }
+          },
+          "patterns": [
+            {
+              "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(=|:)",
+              "captures": {
+                "1": {
+                  "name": "variable.parameter.marol"
+                },
+                "2": {
+                  "name": "punctuation.separator.marol"
+                }
+              }
+            },
+            {
+              "include": "#expression"
+            }
+          ]
+        }
+      ]
+    },
+    "let-binding": {
+      "patterns": [
+        {
+          "name": "meta.let.binding.marol",
+          "begin": "\\b(let)\\b",
+          "end": "(=)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.let.marol"
+            }
+          },
+          "endCaptures": {
+            "1": {
+              "name": "keyword.operator.assignment.marol"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#expression"
+            }
+          ]
+        },
+        {
+          "name": "keyword.control.in.marol",
+          "match": "\\bin\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.marol",
+          "match": "\\b(return|where)\\b"
+        }
+      ]
+    },
+    "control-flow": {
+      "patterns": [
+        {
+          "name": "keyword.control.conditional.marol",
+          "match": "\\b(if|then|else)\\b"
+        }
+      ]
+    },
+    "lambdas": {
+      "patterns": [
+        {
+          "name": "meta.function.closure.marol",
+          "match": "(\\|)([^|]*)(\\|)\\s*(->)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.parameters.begin.marol"
+            },
+            "2": {
+              "name": "variable.parameter.marol"
+            },
+            "3": {
+              "name": "punctuation.definition.parameters.end.marol"
+            },
+            "4": {
+              "name": "keyword.operator.arrow.marol"
+            }
+          }
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.marol",
+          "match": "\\b(map|fold|push|pop|extend|contains|contains_edge|all_paths|steiner_trees|horizontal_neighbors|vertical_neighbors|values|identity_application|value_swap|combinations|consistent|to_2d|abs|max|min|sqrt|powi|ln|Vec|Some|None|Location)\\b"
+        },
+        {
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "name": "entity.name.function.marol"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.type.quantum.marol",
+          "match": "\\b(CX|T|Pauli|PauliMeasurement)\\b"
+        },
+        {
+          "begin": "\\b(Vec|Option|List)\\s*(<)",
+          "end": ">",
+          "beginCaptures": {
+            "1": {
+              "name": "support.type.primitive.marol"
+            },
+            "2": {
+              "name": "punctuation.definition.typeparameters.begin.marol"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.typeparameters.end.marol"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#types"
+            }
+          ]
+        },
+        {
+          "name": "support.type.primitive.marol",
+          "match": "\\b(Location|Loc|Int|Float|Bool|String|Vec|Option|List|QubitMap|Qubit|ArchT|StateT|InstrT|GateRealization|Transition)\\b"
+        },
+        {
+          "name": "entity.name.type.class.marol",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "variable.language.this.marol",
+          "match": "\\b(Arch|State|Step|Gate|Transition|Instr|Trans)\\b"
+        },
+        {
+          "name": "constant.language.marol",
+          "match": "\\b(true|false|None|Some)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "match": "(->|==|!=|<=|>=|\\.\\.|\\|\\||&&|<|>|=|\\+|\\-|\\*|\\/|%|\\||!|&)",
+      "name": "keyword.operator.marol"
+    },
+    "field-access": {
+      "patterns": [
+        {
+          "match": "(\\.)([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.marol"
+            },
+            "2": {
+              "name": "entity.name.function.member.marol"
+            }
+          }
+        },
+        {
+          "match": "(\\.)([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.marol"
+            },
+            "2": {
+              "name": "variable.other.member.marol"
+            }
+          }
+        },
+        {
+          "match": "(\\.)\\((\\d+)\\)",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.marol"
+            },
+            "2": {
+              "name": "constant.numeric.tuple-index.marol"
+            }
+          }
+        },
+        {
+          "begin": "(\\.)\\(",
+          "end": "\\)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.accessor.marol"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.paren.end.marol"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#expression"
+            }
+          ]
+        },
+        {
+          "begin": "\\[",
+          "end": "\\]",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.brackets.begin.marol"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.brackets.end.marol"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#expression"
+            }
+          ]
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.single.marol",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.marol",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.marol",
+          "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b|\\b\\d+[eE][+-]?\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.marol",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "variables": {
+      "match": "\\b[a-z_][a-zA-Z0-9_]*\\b",
+      "name": "variable.other.marol"
+    }
+  }
+}
