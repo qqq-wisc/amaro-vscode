@@ -11,16 +11,16 @@ import {
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
-	console.log("Activating Marol Extension...");
+	console.log("Activating Amaro Extension...");
 
-	const binaryName = process.platform === 'win32' ? 'marol-lsp.exe' : 'marol-lsp';
+	const binaryName = process.platform === 'win32' ? 'amaro-lsp.exe' : 'amaro-lsp';
 	const serverPath = context.asAbsolutePath(
-		path.join('marol-lsp', 'target', 'debug', binaryName)
+		path.join('amaro-lsp', 'target', 'debug', binaryName)
 	);
 	console.log(`Looking for LSP binary at: ${serverPath}`);
 
 	if (!fs.existsSync(serverPath)) {
-		window.showErrorMessage(`Marol LSP binary not found! Expected at: ${serverPath}. Did you run 'cargo build'?`);
+		window.showErrorMessage(`Amaro LSP binary not found! Expected at: ${serverPath}. Did you run 'cargo build'?`);
 		console.error(`Binary missing at ${serverPath}`);
 		return;
 	}
@@ -35,21 +35,21 @@ export function activate(context: ExtensionContext) {
 	};
 
 	const clientOptions: LanguageClientOptions = {
-		documentSelector: [{ scheme: 'file', language: 'marol' }],
+		documentSelector: [{ scheme: 'file', language: 'amaro' }],
 	};
 
 	client = new LanguageClient(
-		'marolLSP',
-		'Marol Language Server',
+		'amaroLSP',
+		'Amaro Language Server',
 		serverOptions,
 		clientOptions
 	);
 
 	client.start().then(() => {
-		console.log("Marol LSP Started!");
+		console.log("Amaro LSP Started!");
 		client.outputChannel.show(true);
 	}).catch(err => {
-		console.error("Marol LSP Failed to start:", err);
+		console.error("Amaro LSP Failed to start:", err);
 	});
 }
 

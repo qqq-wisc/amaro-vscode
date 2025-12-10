@@ -1,7 +1,7 @@
 {
-  "name": "marol-vscode",
-  "displayName": "Marol Language Support",
-  "description": "Language support for Marol quantum gate language (.qmrl)",
+  "name": "amaro-vscode",
+  "displayName": "Amaro",
+  "description": "Language support for Amaro quantum gate language (.qmrl)",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.106.1"
@@ -11,16 +11,16 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/qqq-wisc/marol-vscode.git"
+    "url": "https://github.com/qqq-wisc/amaro-vscode.git"
   },
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [
       {
-        "id": "marol",
+        "id": "amaro",
         "aliases": [
-          "Marol",
-          "marol"
+          "Amaro",
+          "amaro"
         ],
         "extensions": [
           ".qmrl"
@@ -30,9 +30,9 @@
     ],
     "grammars": [
       {
-        "language": "marol",
-        "scopeName": "source.marol",
-        "path": "./src/ide/syntaxes/marol.tmLanguage.json"
+        "language": "amaro",
+        "scopeName": "source.amaro",
+        "path": "./src/ide/syntaxes/amaro.tmLanguage.json"
       }
     ]
   },

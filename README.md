@@ -1,18 +1,18 @@
-# Marol VS Code Extension
+# Amaro VS Code Extension
 
-**Marol** is a domain-specific language for defining Quantum Gate Realizations, Transitions, and Architectures. This extension provides rich syntax highlighting and language server support to make writing `.qmrl` files easier and error-free.
+**Amaro** is a domain-specific language for defining Quantum Gate Realizations, Transitions, and Architectures. This extension provides rich syntax highlighting and language server support to make writing `.qmrl` files easier and error-free.
 
 ## Features
 
 ### Syntax Highlighting
-Full-color syntax highlighting for the Marol language structure, including:
+Full-color syntax highlighting for the Amaro language structure, including:
 * **Blocks:** `GateRealization[...]`, `Transition[...]`, `Architecture[...]`, `Step[...]`.
 * **Info Definitions:** `RouteInfo:`, `TransitionInfo:`, etc.
 * **Embedded Rust:** Correctly highlights Rust code inside `{{ ... }}` blocks.
 * **Quantum Types:** Special highlighting for `CX`, `T`, `Pauli`, and `Location`.
 
 ### Language Server Protocol (LSP)
-Includes a custom Rust-based Language Server (`marol-lsp`) that runs in the background to provide:
+Includes a custom Rust-based Language Server (`amaro-lsp`) that runs in the background to provide:
 * **File Analysis:** Logs file open/change events (Foundation for future type checking).
 * **Safety Checks:** automatically validates that the LSP binary exists.
 
@@ -23,9 +23,9 @@ This extension includes a Rust-based Language Server that must be built locally.
 1.  **Rust Toolchain:** You need `cargo` installed to build the language server.
     * Install from [rustup.rs](https://rustup.rs/).
 2.  **Build Step:**
-    * Navigate to the extension folder: `cd marol-lsp`
+    * Navigate to the extension folder: `cd amaro-lsp`
     * Run `cargo build`
-    * The extension will look for the binary at `marol-lsp/target/debug/marol-lsp`.
+    * The extension will look for the binary at `amaro-lsp/target/debug/amaro-lsp`.
 
 ## Extension Settings
 
@@ -33,9 +33,9 @@ Currently, this extension does not contribute custom settings. It automatically 
 
 ## Example Code
 
-This extension provides highlighting for Marol files like this:
+This extension provides highlighting for Amaro files like this:
 
-```marol
+```amaro
 RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location}
@@ -52,12 +52,12 @@ RouteInfo:
 ```
 
 ## Known Issues
-* **Binary Path:** The extension expects the `marol-lsp` binary to be built in `target/debug`. If you move the folder structure, the extension may fail to start.
+* **Binary Path:** The extension expects the `amaro-lsp` binary to be built in `target/debug`. If you move the folder structure, the extension may fail to start.
 * **LSP Features:** Diagnostics (error checking) are currently in development.
 
 ## Release Notes
 **0.0.1**
 * Initial release.
 * Added Grammar for `.qmrl `files.
-* Added Language Client connection to `marol-lsp`.
+* Added Language Client connection to `amaro-lsp`.
 * Support for embedded Rust syntax.

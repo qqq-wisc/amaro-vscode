@@ -23,7 +23,7 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, _: DidOpenTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, "Marol file opened!")
+            .log_message(MessageType::INFO, "Amaro file opened!")
             .await;
 
         // TODO: Steps  

@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Marol",
-  "scopeName": "source.marol",
+  "name": "Amaro",
+  "scopeName": "source.amaro",
   "fileTypes": [
     "qmrl"
   ],
@@ -62,12 +62,12 @@
       "end": "\\}\\}",
       "beginCaptures": {
         "0": {
-          "name": "punctuation.section.embedded.begin.marol"
+          "name": "punctuation.section.embedded.begin.amaro"
         }
       },
       "endCaptures": {
         "0": {
-          "name": "punctuation.section.embedded.end.marol"
+          "name": "punctuation.section.embedded.end.amaro"
         }
       },
       "patterns": [
@@ -79,7 +79,7 @@
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.double-slash.marol",
+          "name": "comment.line.double-slash.amaro",
           "match": "//.*$"
         }
       ]
@@ -87,20 +87,20 @@
     "block-definitions": {
       "patterns": [
         {
-          "name": "meta.block.marol",
+          "name": "meta.block.amaro",
           "begin": "\\b(GateRealization|Transition|Architecture|Arch|Step)\\s*(\\[)",
           "end": "\\]",
           "beginCaptures": {
             "1": {
-              "name": "storage.type.class.marol"
+              "name": "storage.type.class.amaro"
             },
             "2": {
-              "name": "punctuation.section.block.begin.marol"
+              "name": "punctuation.section.block.begin.amaro"
             }
           },
           "endCaptures": {
             "0": {
-              "name": "punctuation.section.block.end.marol"
+              "name": "punctuation.section.block.end.amaro"
             }
           },
           "patterns": [
@@ -114,15 +114,15 @@
     "info-definitions": {
       "patterns": [
         {
-          "name": "meta.info.block.marol",
+          "name": "meta.info.block.amaro",
           "begin": "\\b(RouteInfo|TransitionInfo|ArchInfo|StateInfo)\\s*(:)",
           "end": "(?=\\b(?:RouteInfo|TransitionInfo|ArchInfo|StateInfo|GateRealization|Transition|Architecture|Arch|Step)\\b|\\z)",
           "beginCaptures": {
             "1": {
-              "name": "keyword.control.directive.marol"
+              "name": "keyword.control.directive.amaro"
             },
             "2": {
-              "name": "punctuation.separator.colon.marol"
+              "name": "punctuation.separator.colon.amaro"
             }
           },
           "patterns": [
@@ -203,7 +203,7 @@
       "patterns": [
         {
           "match": "\\b(routed_gates|name|data|realize_gate|get_transitions|apply|cost|get_locations|width|height|stack_size|magic_state_qubits|alg_qubits|trap_positions|trap_edges|trap_vertices|succ_rates)\\b",
-          "name": "support.type.property-name.marol"
+          "name": "support.type.property-name.amaro"
         }
       ]
     },
@@ -214,15 +214,15 @@
           "end": "\\}",
           "beginCaptures": {
             "1": {
-              "name": "storage.type.struct.marol"
+              "name": "storage.type.struct.amaro"
             },
             "2": {
-              "name": "punctuation.section.struct.begin.marol"
+              "name": "punctuation.section.struct.begin.amaro"
             }
           },
           "endCaptures": {
             "0": {
-              "name": "punctuation.section.struct.end.marol"
+              "name": "punctuation.section.struct.end.amaro"
             }
           },
           "patterns": [
@@ -230,10 +230,10 @@
               "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(=|:)",
               "captures": {
                 "1": {
-                  "name": "variable.parameter.marol"
+                  "name": "variable.parameter.amaro"
                 },
                 "2": {
-                  "name": "punctuation.separator.marol"
+                  "name": "punctuation.separator.amaro"
                 }
               }
             },
@@ -247,17 +247,17 @@
     "let-binding": {
       "patterns": [
         {
-          "name": "meta.let.binding.marol",
+          "name": "meta.let.binding.amaro",
           "begin": "\\b(let)\\b",
           "end": "(=)",
           "beginCaptures": {
             "1": {
-              "name": "keyword.control.let.marol"
+              "name": "keyword.control.let.amaro"
             }
           },
           "endCaptures": {
             "1": {
-              "name": "keyword.operator.assignment.marol"
+              "name": "keyword.operator.assignment.amaro"
             }
           },
           "patterns": [
@@ -267,7 +267,7 @@
           ]
         },
         {
-          "name": "keyword.control.in.marol",
+          "name": "keyword.control.in.amaro",
           "match": "\\bin\\b"
         }
       ]
@@ -275,7 +275,7 @@
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.marol",
+          "name": "keyword.control.amaro",
           "match": "\\b(return|where)\\b"
         }
       ]
@@ -283,7 +283,7 @@
     "control-flow": {
       "patterns": [
         {
-          "name": "keyword.control.conditional.marol",
+          "name": "keyword.control.conditional.amaro",
           "match": "\\b(if|then|else)\\b"
         }
       ]
@@ -291,20 +291,20 @@
     "lambdas": {
       "patterns": [
         {
-          "name": "meta.function.closure.marol",
+          "name": "meta.function.closure.amaro",
           "match": "(\\|)([^|]*)(\\|)\\s*(->)",
           "captures": {
             "1": {
-              "name": "punctuation.definition.parameters.begin.marol"
+              "name": "punctuation.definition.parameters.begin.amaro"
             },
             "2": {
-              "name": "variable.parameter.marol"
+              "name": "variable.parameter.amaro"
             },
             "3": {
-              "name": "punctuation.definition.parameters.end.marol"
+              "name": "punctuation.definition.parameters.end.amaro"
             },
             "4": {
-              "name": "keyword.operator.arrow.marol"
+              "name": "keyword.operator.arrow.amaro"
             }
           }
         }
@@ -313,19 +313,19 @@
     "functions": {
       "patterns": [
         {
-          "name": "support.function.builtin.marol",
+          "name": "support.function.builtin.amaro",
           "match": "\\b(map|fold|push|pop|extend|contains|contains_edge|all_paths|steiner_trees|horizontal_neighbors|vertical_neighbors|values|identity_application|value_swap|combinations|consistent|to_2d|abs|max|min|sqrt|powi|ln|Vec|Some|None|Location)\\b"
         },
         {
           "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()",
-          "name": "entity.name.function.marol"
+          "name": "entity.name.function.amaro"
         }
       ]
     },
     "types": {
       "patterns": [
         {
-          "name": "entity.name.type.quantum.marol",
+          "name": "entity.name.type.quantum.amaro",
           "match": "\\b(CX|T|Pauli|PauliMeasurement)\\b"
         },
         {
@@ -333,15 +333,15 @@
           "end": ">",
           "beginCaptures": {
             "1": {
-              "name": "support.type.primitive.marol"
+              "name": "support.type.primitive.amaro"
             },
             "2": {
-              "name": "punctuation.definition.typeparameters.begin.marol"
+              "name": "punctuation.definition.typeparameters.begin.amaro"
             }
           },
           "endCaptures": {
             "0": {
-              "name": "punctuation.definition.typeparameters.end.marol"
+              "name": "punctuation.definition.typeparameters.end.amaro"
             }
           },
           "patterns": [
@@ -351,11 +351,11 @@
           ]
         },
         {
-          "name": "support.type.primitive.marol",
+          "name": "support.type.primitive.amaro",
           "match": "\\b(Location|Loc|Int|Float|Bool|String|Vec|Option|List|QubitMap|Qubit|ArchT|StateT|InstrT|GateRealization|Transition)\\b"
         },
         {
-          "name": "entity.name.type.class.marol",
+          "name": "entity.name.type.class.amaro",
           "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
         }
       ]
@@ -363,18 +363,18 @@
     "constants": {
       "patterns": [
         {
-          "name": "variable.language.this.marol",
+          "name": "variable.language.this.amaro",
           "match": "\\b(Arch|State|Step|Gate|Transition|Instr|Trans)\\b"
         },
         {
-          "name": "constant.language.marol",
+          "name": "constant.language.amaro",
           "match": "\\b(true|false|None|Some)\\b"
         }
       ]
     },
     "operators": {
       "match": "(->|==|!=|<=|>=|\\.\\.|\\|\\||&&|<|>|=|\\+|\\-|\\*|\\/|%|\\||!|&)",
-      "name": "keyword.operator.marol"
+      "name": "keyword.operator.amaro"
     },
     "field-access": {
       "patterns": [
@@ -382,10 +382,10 @@
           "match": "(\\.)([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()",
           "captures": {
             "1": {
-              "name": "punctuation.accessor.marol"
+              "name": "punctuation.accessor.amaro"
             },
             "2": {
-              "name": "entity.name.function.member.marol"
+              "name": "entity.name.function.member.amaro"
             }
           }
         },
@@ -393,10 +393,10 @@
           "match": "(\\.)([a-z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": {
-              "name": "punctuation.accessor.marol"
+              "name": "punctuation.accessor.amaro"
             },
             "2": {
-              "name": "variable.other.member.marol"
+              "name": "variable.other.member.amaro"
             }
           }
         },
@@ -404,10 +404,10 @@
           "match": "(\\.)\\((\\d+)\\)",
           "captures": {
             "1": {
-              "name": "punctuation.accessor.marol"
+              "name": "punctuation.accessor.amaro"
             },
             "2": {
-              "name": "constant.numeric.tuple-index.marol"
+              "name": "constant.numeric.tuple-index.amaro"
             }
           }
         },
@@ -416,12 +416,12 @@
           "end": "\\)",
           "beginCaptures": {
             "1": {
-              "name": "punctuation.accessor.marol"
+              "name": "punctuation.accessor.amaro"
             }
           },
           "endCaptures": {
             "0": {
-              "name": "punctuation.section.paren.end.marol"
+              "name": "punctuation.section.paren.end.amaro"
             }
           },
           "patterns": [
@@ -435,12 +435,12 @@
           "end": "\\]",
           "beginCaptures": {
             "0": {
-              "name": "punctuation.section.brackets.begin.marol"
+              "name": "punctuation.section.brackets.begin.amaro"
             }
           },
           "endCaptures": {
             "0": {
-              "name": "punctuation.section.brackets.end.marol"
+              "name": "punctuation.section.brackets.end.amaro"
             }
           },
           "patterns": [
@@ -452,12 +452,12 @@
       ]
     },
     "strings": {
-      "name": "string.quoted.single.marol",
+      "name": "string.quoted.single.amaro",
       "begin": "'",
       "end": "'",
       "patterns": [
         {
-          "name": "constant.character.escape.marol",
+          "name": "constant.character.escape.amaro",
           "match": "\\\\."
         }
       ]
@@ -465,18 +465,18 @@
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.float.marol",
+          "name": "constant.numeric.float.amaro",
           "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b|\\b\\d+[eE][+-]?\\d+\\b"
         },
         {
-          "name": "constant.numeric.integer.marol",
+          "name": "constant.numeric.integer.amaro",
           "match": "\\b\\d+\\b"
         }
       ]
     },
     "variables": {
       "match": "\\b[a-z_][a-zA-Z0-9_]*\\b",
-      "name": "variable.other.marol"
+      "name": "variable.other.amaro"
     }
   }
 }
