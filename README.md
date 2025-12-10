@@ -1,71 +1,63 @@
-# marol-vscode README
+# Marol VS Code Extension
 
-This is the README for your extension "marol-vscode". After writing up a brief description, we recommend including the following sections.
+**Marol** is a domain-specific language for defining Quantum Gate Realizations, Transitions, and Architectures. This extension provides rich syntax highlighting and language server support to make writing `.qmrl` files easier and error-free.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+### Syntax Highlighting
+Full-color syntax highlighting for the Marol language structure, including:
+* **Blocks:** `GateRealization[...]`, `Transition[...]`, `Architecture[...]`, `Step[...]`.
+* **Info Definitions:** `RouteInfo:`, `TransitionInfo:`, etc.
+* **Embedded Rust:** Correctly highlights Rust code inside `{{ ... }}` blocks.
+* **Quantum Types:** Special highlighting for `CX`, `T`, `Pauli`, and `Location`.
 
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+### Language Server Protocol (LSP)
+Includes a custom Rust-based Language Server (`marol-lsp`) that runs in the background to provide:
+* **File Analysis:** Logs file open/change events (Foundation for future type checking).
+* **Safety Checks:** automatically validates that the LSP binary exists.
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+This extension includes a Rust-based Language Server that must be built locally.
+
+1.  **Rust Toolchain:** You need `cargo` installed to build the language server.
+    * Install from [rustup.rs](https://rustup.rs/).
+2.  **Build Step:**
+    * Navigate to the extension folder: `cd marol-lsp`
+    * Run `cargo build`
+    * The extension will look for the binary at `marol-lsp/target/debug/marol-lsp`.
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+Currently, this extension does not contribute custom settings. It automatically activates for files with the `.qmrl` extension.
 
-For example:
+## Example Code
 
-This extension contributes the following settings:
+This extension provides highlighting for Marol files like this:
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+```marol
+RouteInfo:
+    routed_gates = CX
+    GateRealization{u : Location, v : Location}
+    realize_gate = if Arch.contains_edge((State.map[Gate.qubits[0]],State.map[Gate.qubits[1]]))
+            then Some(GateRealization{u = State.map[Gate.qubits[0]],v = State.map[Gate.qubits[1]]})
+            else None
+
+{{
+    // Embedded Rust code
+    fn get_cost(pair: (Location, Location)) -> f64 {
+        return 0.0;
+    }
+}}
+```
 
 ## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
+* **Binary Path:** The extension expects the `marol-lsp` binary to be built in `target/debug`. If you move the folder structure, the extension may fail to start.
+* **LSP Features:** Diagnostics (error checking) are currently in development.
 
 ## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+**0.0.1**
+* Initial release.
+* Added Grammar for `.qmrl `files.
+* Added Language Client connection to `marol-lsp`.
+* Support for embedded Rust syntax.
