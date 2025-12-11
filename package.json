@@ -34,7 +34,18 @@
         "scopeName": "source.amaro",
         "path": "./src/ide/syntaxes/amaro.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Amaro LSP",
+      "properties": {
+        "amaro.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Amaro language server."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
