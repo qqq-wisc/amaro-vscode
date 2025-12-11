@@ -280,3 +280,76 @@ next block"#;
     let (rest, _) = consume_remaining_block(input).unwrap();
     assert!(rest.starts_with("RouteInfo:"));
 }
+
+#[test]
+fn test_rust_block_is_ignored() {
+    let input = r#"
+GateRealization[ name='test' ]
+{{
+qubit: *aod_qubit,
+}}
+"#;
+    let file = parse_file(input).unwrap();
+    // Should find GateRealization, but IGNORE the rust block contents
+    assert_eq!(file.blocks.len(), 1);
+    assert_eq!(file.blocks[0].kind, "GateRealization");
+}
+
+#[test]
+fn test_rust_block_not_parsed_as_colon_block() {
+    let input = r#"{{
+fn test() {
+    qubit: SomeType,
+}
+}}
+
+GateRealization[
+    name = 'test'
+]"#;
+    let result = parse_file(input);
+    assert!(result.is_ok());
+    let file = result.unwrap();
+    assert_eq!(file.blocks.len(), 1);
+    assert_eq!(file.blocks[0].kind, "GateRealization");
+}
+
+#[test]
+fn test_all_rust_block_positions() {
+    // Test 1: Rust block at start
+    let input1 = r#"{{
+fn test() { qubit: Type }
+}}
+GateRealization[name='test']"#;
+    let result1 = parse_file(input1);
+    assert!(result1.is_ok());
+    assert_eq!(result1.unwrap().blocks.len(), 1);
+
+    // Test 2: Rust block between blocks
+    let input2 = r#"GateRealization[name='a']
+{{
+fn test() { qubit: Type }
+}}
+Transition[name='b']"#;
+    let result2 = parse_file(input2);
+    assert!(result2.is_ok());
+    assert_eq!(result2.unwrap().blocks.len(), 2);
+
+    // Test 3: Rust block at end
+    let input3 = r#"GateRealization[name='test']
+{{
+fn test() { qubit: Type }
+}}"#;
+    let result3 = parse_file(input3);
+    assert!(result3.is_ok());
+    assert_eq!(result3.unwrap().blocks.len(), 1);
+
+    // Test 4: Multiple rust blocks
+    let input4 = r#"{{fn a() {}}}
+GateRealization[name='test']
+{{fn b() { qubit: X }}}
+Transition[name='t']
+{{fn c() {}}}"#;
+    let result4 = parse_file(input4);
+    assert!(result4.is_ok());
+    assert_eq!(result4.unwrap().blocks.len(), 2);
+}

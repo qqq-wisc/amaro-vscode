@@ -29,8 +29,8 @@ pub fn parse_rust_embedded(input: &str) -> IResult<&str, &str> {
 
 pub fn parse_identifier(input: &str) -> IResult<&str, &str> {
     recognize(pair(
-        satisfy(|c| c.is_alphabetic() || c == '_'),
-        take_while(|c: char| c.is_alphanumeric() || c == '_')
+        satisfy(|c| c.is_ascii_alphabetic() || c == '_'),
+        take_while(|c: char| c.is_ascii_alphanumeric() || c == '_')
     ))(input)
 }
 
@@ -73,6 +73,10 @@ pub fn consume_remaining_block(input: &str) -> IResult<&str, &str> {
 pub fn parse_block<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, Option<Block>> {
     let (input, _) = whitespace_handler(input)?;
 
+    if let Ok((rest, _)) = parse_rust_embedded(input) {
+        return Ok((rest, None));
+    }
+
     let start_offset = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
     let (input, kind) = parse_identifier(input)?;
@@ -92,7 +96,7 @@ pub fn parse_block<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a s
 
     let (input, _) = char::<&str, Error<&str>>('[')(input)?;
     
-    let (input, _content) = parse_balanced_parenthesis(input)?;
+    let (input, _) = parse_balanced_parenthesis(input)?;
     let (rest, _) = char(']')(input)?;
 
     Ok((rest, Some(Block {

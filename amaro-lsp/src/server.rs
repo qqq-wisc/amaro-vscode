@@ -16,6 +16,9 @@ impl Backend {
         match parse_file(&text) {
             Ok(file) => {
                 // Semantic Checks
+                let ast_debug = format!("{:#?}", file);
+                self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_debug)).await;
+                
                 let mut semantic_errors = check_semantics(&file);
                 diagnostics.append(&mut semantic_errors);
             }
