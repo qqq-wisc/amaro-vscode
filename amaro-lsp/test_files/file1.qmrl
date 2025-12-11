@@ -1,0 +1,15 @@
+GateRealization[
+    routed_gates = CX
+    name = 'SimpleGate'
+    data = (u : Location, v : Location)
+]
+
+Transition[
+    name = 'SimpleTransition'
+    cost = 1.0
+]
+
+Architecture[
+    name = 'SimpleArch'
+    data = (width : Int, height : Int)
+]

@@ -1,0 +1,23 @@
+
+// File with invalid content that should be skipped
+
+this is invalid
+random text here
+12345 numbers
+
+GateRealization[
+    name = 'ValidBlock1'
+]
+
+more invalid stuff
+{{ not properly closed
+
+Transition[
+    name = 'ValidBlock2'
+]
+
+let unfinished =
+
+Architecture[
+    name = 'ValidBlock3'
+]
