@@ -28,6 +28,12 @@
         "configuration": "./language-configuration.json"
       }
     ],
+    "snippets": [
+      {
+        "language": "amaro",
+        "path": "./src/snippets/amaro.json"
+      }
+    ],
     "grammars": [
       {
         "language": "amaro",
