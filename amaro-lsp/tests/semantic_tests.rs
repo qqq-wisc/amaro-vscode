@@ -59,6 +59,7 @@ fn test_duplicate_blocks_error() {
     assert_eq!(diags.len(), 1, "Should have exactly 1 error for the duplicate block");
     
     let error = &diags[0];
+    println!("Error: {:?}", error);
     assert_eq!(error.severity, Some(DiagnosticSeverity::ERROR));
     assert!(error.message.contains("Duplicate definition"));
     assert!(error.message.contains("RouteInfo"));
@@ -74,6 +75,7 @@ fn test_duplicate_and_missing_combined() {
     let file = parse_file(input).unwrap();
     let diags = check_semantics(&file);
     
+    println!("Diagnostics: {:?}", diags);
     assert_eq!(diags.len(), 2);
     
     let has_dup = diags.iter().any(|d| d.message.contains("Duplicate definition"));

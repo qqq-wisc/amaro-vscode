@@ -216,7 +216,7 @@ fn test_windows_line_endings() {
 fn test_file_no_trailing_newline() {
     let input = r#"GateRealization[
 name = 'test'
-]"#;  // no newline
+]"#;
 
     let file = parse_file(input).unwrap();
     assert_eq!(file.blocks.len(), 1);
@@ -350,6 +350,7 @@ GateRealization[name='test']
 Transition[name='t']
 {{fn c() {}}}"#;
     let result4 = parse_file(input4);
+    print!("Result4: {:?}", result4);
     assert!(result4.is_ok());
     assert_eq!(result4.unwrap().blocks.len(), 2);
 }
