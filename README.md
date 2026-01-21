@@ -6,18 +6,24 @@
 
 ### Syntax Highlighting
 Full-color syntax highlighting for the Amaro language structure, including:
-* **Blocks:** `GateRealization[...]`, `Transition[...]`, `Architecture[...]`, `Step[...]`.
-* **Info Definitions:** `RouteInfo:`, `TransitionInfo:`, etc.
+* **Blocks:** `GateRealization`, `Transition`, `Architecture`, `Step`.
+* **Info Definitions:** `RouteInfo:`, `TransitionInfo:`, `ArchInfo:`.
 * **Embedded Rust:** Correctly highlights Rust code inside `{{ ... }}` blocks.
 * **Quantum Types:** Special highlighting for `CX`, `T`, `Pauli`, and `Location`.
 
 ### Language Server Protocol (LSP)
-Includes a custom Rust-based Language Server (`amaro-lsp`) that runs in the background to provide:
-* **Code Diagnostics & Checks:** Includes basic syntactic validation and style checks:
-    * **Style Convention Check:** Warns if recognized block names (e.g., `transition`) are not capitalized (`Transition`).
-    * **Robust Parsing:** Handles complex nested brackets and declarative colon blocks (e.g., `RouteInfo:`) without breaking the parser.
-* **File Analysis:** Logs file open/change events (Foundation for future type checking).
-* **Safety Checks:** automatically validates that the LSP binary exists.
+Includes a custom Rust-based Language Server (`amaro-lsp`) that provides:
+
+1.  **Semantic Analysis & Diagnostics:**
+    * **Validation:** checks for mandatory blocks (e.g., `RouteInfo`) and required fields (e.g., `routed_gates`).
+    * **Style Checks:** Warns if block names are not capitalized (e.g., `transition` → `Transition`).
+    * **Structure:** Validates correct key-value pairs and struct definitions.
+2.  **Document Outline (Symbols):**
+    * Navigate complex files easily using the VS Code "Outline" view or "Go to Symbol" (`Ctrl+Shift+O`).
+    * Symbols are categorized by hierarchy: Blocks (Classes), Steps (Functions), and Fields.
+3.  **Robust Parsing:**
+    * Fault-tolerant parsing that continues analyzing the file even after encountering syntax errors.
+    * Full support for embedded Rust blocks `{{ ... }}`.
 
 ## Requirements
 
@@ -28,26 +34,26 @@ This extension relies on a Rust-based Language Server (`amaro-lsp`) that must be
 2.  **Build Step:**
     * Navigate to the extension folder: `cd amaro-lsp`
     * Run `cargo build`
-    * The extension will look for the binary at `amaro-lsp/target/debug/amaro-lsp`.
-
-## Extension Settings
-
-Currently, this extension does not contribute custom settings. It automatically activates for files with the `.qmrl` extension.
+    * The extension looks for the binary at `amaro-lsp/target/debug/amaro-lsp`.
 
 ## Example Code
 
-This extension provides highlighting and diagnostics for Amaro files like this:
+This extension provides highlighting, navigation, and error checking for Amaro files like this:
 
 ```amaro
 RouteInfo:
     routed_gates = CX
-    GateRealization{u : Location, v : Location}
-    realize_gate = if Arch.contains_edge((State.map[Gate.qubits[0]],State.map[Gate.qubits[1]]))
-            then Some(GateRealization{u = State.map[Gate.qubits[0]],v = State.map[Gate.qubits[1]]})
-            else None
+    realize_gate = Some(value)
+
+    // Struct definitions are supported inside blocks
+    GateRealization { u: Location, v: Location }
+
+TransitionInfo:
+    cost = 1.0
+    apply = identity
 
 {{
-    // Embedded Rust code
+    // Embedded Rust code is parsed and ignored by the Amaro validator
     fn get_cost(pair: (Location, Location)) -> f64 {
         return 0.0;
     }
@@ -56,13 +62,15 @@ RouteInfo:
 
 ## Known Issues
 * **Binary Path:** The extension expects the `amaro-lsp` binary to be built in `target/debug`. You must run `cargo build` before starting the extension.
-* You may need to adjust your build process if you change the project structure.
-* **LSP Features:** Comprehensive type-checking and structural validation is still under development.
+* **Type Checking:** Advanced type checking (e.g., validating that `routed_gates` is assigned a valid Gate type) is currently in early development.
 
 ## Release Notes
 **0.0.1**
 * Initial release.
 * Added Grammar for `.qmrl `files.
 * Added Language Client connection to `amaro-lsp`.
-* Support for embedded Rust syntax (`{{ ... }}`).
-* Implemented Style Diagnostics (Capitalization checks for blocks).
+* **Core Parser:** Implemented robust AST parsing with error recovery.
+* **Semantic Analysis:** Added diagnostics for missing mandatory blocks and required keys.
+* **Symbol Navigation:** Added support for "Go to Symbol" and Outline view.
+* **Embedded Rust:** Improved parsing for Rust code blocks {{ ... }}.
+* **Fixes:** Resolved concurrency issues with node IDs in the language server.

@@ -14,6 +14,7 @@ pub struct Backend {
     pub documents: Arc<RwLock<HashMap<Url, String>>>,
 }
 
+// Symbol Tree Builder
 pub fn build_document_symbols(file: &AmaroFile) -> Vec<DocumentSymbol> {
     file.blocks.iter().map(|block| {
         let kind = match block.kind.as_str() {
@@ -24,18 +25,36 @@ pub fn build_document_symbols(file: &AmaroFile) -> Vec<DocumentSymbol> {
         };
 
         #[allow(deprecated)]
-        let children: Vec<DocumentSymbol> = block.fields.iter().map(|field| {
-            DocumentSymbol {
-                name: field.key.clone(),
-                detail: Some(field.value.chars().take(30).collect()), // Preview value
-                kind: SymbolKind::FIELD, // Shows as a little blue tag
-                tags: None,
-                deprecated: None,
-                range: field.key_range,
-                selection_range: field.key_range,
-                children: None,
-            }
-        }).collect();
+        let children: Vec<DocumentSymbol> = match &block.content {
+            BlockContent::Fields(items) => items.iter().filter_map(|item| {
+                match item {
+                    BlockItem::Field(field) => {
+                        Some(DocumentSymbol {
+                            name: field.key.clone(),
+                            detail: Some(format_expr_preview(&field.value)),
+                            kind: SymbolKind::FIELD,
+                            tags: None,
+                            deprecated: None,
+                            range: field.key_range,
+                            selection_range: field.key_range,
+                            children: None,
+                        })
+                    },
+                    BlockItem::StructDef(struct_def) => {
+                        Some(DocumentSymbol {
+                            name: struct_def.name.clone(),
+                            detail: Some(format!("Struct with {} fields", struct_def.fields.len())),
+                            kind: SymbolKind::STRUCT,
+                            tags: None,
+                            deprecated: None,
+                            range: struct_def.range,
+                            selection_range: struct_def.name_range,
+                            children: None,
+                        })
+                    },
+                }
+            }).collect(),
+        };
 
         #[allow(deprecated)]
         DocumentSymbol {
@@ -49,6 +68,39 @@ pub fn build_document_symbols(file: &AmaroFile) -> Vec<DocumentSymbol> {
             children: if children.is_empty() { None } else { Some(children) },
         }
     }).collect()
+}
+
+fn format_expr_preview(expr: &Expr) -> String {
+    match &expr.kind {
+        ExprKind::Identifier(name) => name.clone(),
+        ExprKind::IntLiteral(i) => i.to_string(),
+        ExprKind::FloatLiteral(f) => format!("{:.2}", f),
+        ExprKind::StringLiteral(s) => format!("'{}'", s),
+        ExprKind::BoolLiteral(b) => b.to_string(),
+        
+        ExprKind::List(items) => format!("[{} items]", items.len()),
+        ExprKind::Tuple(items) => format!("({} items)", items.len()),
+        
+        ExprKind::StructLiteral { name, .. } => format!("{} {{...}}", name),
+        ExprKind::FunctionCall { function, .. } => format!("{}(...)", format_expr_preview(function)),
+        
+        ExprKind::FieldAccess { object, field } => format!("{}.{}", format_expr_preview(object), field),
+        ExprKind::IndexAccess { object, .. } => format!("{}[...]", format_expr_preview(object)),
+        
+        // Handle Projections (e.g., tuple.(0))
+        ExprKind::Projection { index, .. } => format!("tuple.({})", index),
+
+        ExprKind::Lambda { .. } => "|...| -> ...".to_string(),
+        ExprKind::IfThenElse { .. } => "if ... then ...".to_string(),
+        ExprKind::LetBinding { name, .. } => format!("let {} = ...", name),
+        
+        ExprKind::BinaryOp { .. } => "expr op expr".to_string(),
+        ExprKind::UnaryOp { op, operand } => format!("{:?} {}", op, format_expr_preview(operand)),
+        ExprKind::TensorProduct { .. } => "... ⊗ ...".to_string(),
+
+        ExprKind::Some(_) => "Some(...)".to_string(),
+        ExprKind::None => "None".to_string(),
+    }
 }
 
 
@@ -74,11 +126,11 @@ impl Backend {
                 let mut semantic_errors = check_semantics(&file);
                 diagnostics.append(&mut semantic_errors);
             }
-            Err(_) => {
+            Err(e) => {
                 diagnostics.push(Diagnostic {
                     range: Range::default(),
                     severity: Some(DiagnosticSeverity::ERROR),
-                    message: "Fatal Syntax Error: Parsing aborted.".to_string(),
+                    message: format!("Fatal Syntax Error: Parsing aborted.\nParse error: {}", e),
                     ..Default::default()
                 });
             }
