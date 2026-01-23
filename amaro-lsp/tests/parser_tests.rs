@@ -138,7 +138,6 @@ name = 'next'
 ]"#;
 
     let (rest, _) = consume_remaining_block(input).unwrap();
-    // It should stop consuming when it sees the start of a new block
     assert!(rest.starts_with("GateRealization["));
 }
 
@@ -197,7 +196,6 @@ fn test_lambda_expression() {
     let BlockContent::Fields(items) = &file.blocks[0].content; 
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "realize_gate");
-        // Value should be a function call with lambda
         if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0].kind, ExprKind::Lambda { .. }));
@@ -242,7 +240,6 @@ fn test_field_access() {
     
     let BlockContent::Fields(items) = &file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
-        // Should parse as IndexAccess with FieldAccess inside
         assert!(matches!(field.value.kind, ExprKind::IndexAccess { .. }));
     }
 }
@@ -465,7 +462,126 @@ TransitionInfo:
             }
         }
     }
-    println!("Collected IDs: {:?}", ids);
     
     assert!(ids.len() >= 10, "Should have many unique node IDs");
+}
+
+
+// Multiline Expression Tests
+
+#[test]
+fn test_multiline_if_then_else() {
+    let input = r#"RouteInfo:
+    realize_gate = if condition
+        then result1
+        else result2"#;
+    
+    let file = parse_file(input).unwrap();
+    assert_eq!(file.blocks.len(), 1);
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    assert_eq!(items.len(), 1);
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert_eq!(field.key, "realize_gate");
+        assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
+    } else {
+        panic!("Expected field, got struct def");
+    }
+}
+
+#[test]
+fn test_multiline_if_with_complex_condition() {
+    let input = r#"RouteInfo:
+    realize_gate = if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
+        then Some(GateRealization{u = State.map[Gate.qubits[0]]})
+        else None"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert_eq!(field.key, "realize_gate");
+        if let ExprKind::IfThenElse { condition, then_branch, else_branch } = &field.value.kind {
+            assert!(matches!(condition.kind, ExprKind::FunctionCall { .. }));
+            assert!(matches!(then_branch.kind, ExprKind::Some(_)));
+            assert!(matches!(else_branch.kind, ExprKind::None));
+        } else {
+            panic!("Expected if-then-else");
+        }
+    }
+}
+
+#[test]
+fn test_multiline_let_binding() {
+    let input = r#"TransitionInfo:
+    cost = let foo = if x == y
+            then 0.0
+            else 1.0
+        in foo"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert_eq!(field.key, "cost");
+        assert!(matches!(field.value.kind, ExprKind::LetBinding { .. }));
+    }
+}
+
+#[test]
+fn test_multiline_lambda() {
+    let input = r#"RouteInfo:
+    realize_gate = map(|x|
+        -> GateRealization{path = x}, 
+        all_paths())"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert_eq!(field.key, "realize_gate");
+        if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
+            assert!(matches!(args[0].kind, ExprKind::Lambda { .. }));
+        }
+    }
+}
+
+#[test]
+fn test_deeply_nested_multiline_expression() {
+    let input = r#"RouteInfo:
+    realize_gate = if (Gate.gate_type()) == CX
+        then
+            map(|x| -> GateRealization{path = x},
+                all_paths(arch,
+                    vertical_neighbors(State.map[Gate.qubits[0]], Arch.width)))
+        else
+            map(|y| -> GateRealization{path = y},
+                other_paths())"#;
+    
+    let file = parse_file(input).unwrap();
+
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    assert_eq!(items.len(), 1);
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert_eq!(field.key, "realize_gate");
+        assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
+    } else {
+        panic!("Expected realize_gate field but got: {:?}", items);
+    }
+}
+
+#[test]
+fn test_multiline_with_comments() {
+    let input = r#"RouteInfo:
+    realize_gate = if condition  // Check condition
+        then result1  // First option
+        else result2  // Second option"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert_eq!(field.key, "realize_gate");
+        assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
+    }
 }

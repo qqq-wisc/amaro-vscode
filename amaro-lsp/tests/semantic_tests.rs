@@ -20,7 +20,6 @@ fn capitalization_warning() {
     let file = parse_file(&input).unwrap();
     let diags = check_semantics(&file);
 
-    // Robust check: convert to lowercase to handle "Capitalized" vs "capitalized as"
     let cap_errors: Vec<_> = diags.iter()
         .filter(|d| d.message.to_lowercase().contains("capitalized"))
         .collect();

@@ -103,6 +103,61 @@ fn format_expr_preview(expr: &Expr) -> String {
     }
 }
 
+fn format_simple_ast(file: &AmaroFile) -> String {
+    let mut output = String::new();
+    output.push_str("=== AST Summary ===\n");
+    for block in &file.blocks {
+        let start = block.range.start;
+        output.push_str(&format!("Amaro Block: {} at line {}, col {}\n", block.kind, start.line + 1, start.character));
+
+        match &block.content {
+            BlockContent::Fields(items) => {
+                for item in items {
+                    match item {
+                        BlockItem::Field(f) => {
+                            let key_pos = f.key_range.start;
+                            output.push_str(&format!("  Field: {} = {} (line {}, col {})\n", 
+                                f.key, 
+                                summarize_expr(&f.value), 
+                                key_pos.line + 1, 
+                                key_pos.character
+                            ));
+                        }
+                        BlockItem::StructDef(s) => {
+                            let struct_pos = s.name_range.start;
+                            output.push_str(&format!("  StructDef: {} (line {}, col {})\n", 
+                                s.name, 
+                                struct_pos.line + 1, 
+                                struct_pos.character
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    output.push_str("===================");
+    output
+}
+
+fn summarize_expr(expr: &Expr) -> String {
+    match &expr.kind {
+        ExprKind::Identifier(s) => s.clone(),
+        ExprKind::FloatLiteral(f) => format!("{}", f),
+        ExprKind::IntLiteral(i) => format!("{}", i),
+        ExprKind::BoolLiteral(b) => format!("{}", b),
+        ExprKind::List(items) => format!("[{} items...]", items.len()),
+        ExprKind::Tuple(items) => format!("({} items...)", items.len()),
+        ExprKind::Some(_) => "Some(...)".to_string(),
+        ExprKind::None => "None".to_string(),
+        ExprKind::BinaryOp { .. } => "BinaryOp(...)".to_string(),
+        ExprKind::FunctionCall { .. } => "FunctionCall(...)".to_string(),
+        ExprKind::FieldAccess { .. } => "FieldAccess(...)".to_string(),
+        ExprKind::IfThenElse { .. } => "If/Else".to_string(),
+        _ => "Expr".to_string(),
+    }
+}
+
 
 impl Backend {
     pub fn new(client: Client) -> Self {
@@ -120,8 +175,10 @@ impl Backend {
         match parse_file(&text) {
             Ok(file) => {
                 // Semantic Checks
-                let ast_debug = format!("{:#?}", file);
-                self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_debug)).await;
+                let ast_summary = format_simple_ast(&file);
+                self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_summary)).await;
+                // let ast_debug = format!("{:#?}", file);
+                // self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_debug)).await;
                 
                 let mut semantic_errors = check_semantics(&file);
                 diagnostics.append(&mut semantic_errors);
@@ -150,7 +207,6 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 
-                // Phase 1: Enable Document Symbols
                 document_symbol_provider: Some(OneOf::Left(true)),
 
                 ..Default::default()
@@ -201,7 +257,6 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
-    // Phase 1: Document Symbols Implementation
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
