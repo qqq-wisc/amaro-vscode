@@ -15,26 +15,47 @@ Full-color syntax highlighting for the Amaro language structure, including:
 Includes a custom Rust-based Language Server (`amaro-lsp`) that provides:
 
 1.  **Semantic Analysis & Diagnostics:**
-    * **Validation:** checks for mandatory blocks (e.g., `RouteInfo`) and required fields (e.g., `routed_gates`).
-    * **Style Checks:** Warns if block names are not capitalized (e.g., `transition` → `Transition`).
-    * **Structure:** Validates correct key-value pairs and struct definitions.
+    * **Validation:** Checks for mandatory blocks (e.g., `RouteInfo`) and required fields (e.g., `routed_gates`).
+    * **Style/Lint Checks:** Warns if block names are not capitalized (e.g., `transition` → `Transition`).
+    * **Structure:** Validates correct key-value pairs, fields and struct definitions.
 2.  **Document Outline (Symbols):**
-    * Navigate complex files easily using the VS Code "Outline" view or "Go to Symbol" (`Ctrl+Shift+O`).
+    * Navigate complex blocks, steps, fields and files easily using the VS Code "Outline" view or "Go to Symbol" (`Ctrl+Shift+O`).
     * Symbols are categorized by hierarchy: Blocks (Classes), Steps (Functions), and Fields.
 3.  **Robust Parsing:**
-    * Fault-tolerant parsing that continues analyzing the file even after encountering syntax errors.
+    * Fault-tolerant parsing that continues analyzing the file even after encountering syntax errors (Error recovery).
     * Full support for embedded Rust blocks `{{ ... }}`.
 
 ## Requirements
 
 This extension relies on a Rust-based Language Server (`amaro-lsp`) that must be built locally.
 
-1.  **Rust Toolchain:** You need `cargo` installed to build the language server.
+1.  **Node.js & npm:** The VS Code extention portion requires Node.js.
+    * Install from [nodejs.org](https://nodejs.org/en).
+2.  **Rust Toolchain:** You need `cargo` installed to build the language server.
     * Install from [rustup.rs](https://rustup.rs/).
-2.  **Build Step:**
-    * Navigate to the extension folder: `cd amaro-lsp`
-    * Run `cargo build`
-    * The extension looks for the binary at `amaro-lsp/target/debug/amaro-lsp`.
+3.  **Build Step:**
+    * The extension looks for the binary at `amaro-lsp/target/debug/amaro-lsp` after the build step is complete.
+
+## Building & Running the Extension
+Clone the repository and build as follows:
+```bash
+# Install Node modules
+npm install
+
+# Build the Rust language server
+cd amaro-lsp
+cargo build
+cd ..
+
+# Start the extension in watch mode
+npm run watch
+```
+
+### Running the Extension
+After running `npm run watch`:
+1. **Press `F5` in VS Code.**
+2. A new VS Code window will open with the **Amaro extension loaded**.
+3. Open any `.qmrl` file to see highlighting, symbols, and diagnostics.
 
 ## Example Code
 
