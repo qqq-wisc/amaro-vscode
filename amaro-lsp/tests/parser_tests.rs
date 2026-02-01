@@ -585,3 +585,64 @@ fn test_multiline_with_comments() {
         assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
     }
 }
+
+#[test]
+fn test_comma_separated_gates_no_brackets() {
+    let input = r#"RouteInfo:
+    routed_gates = CX, T
+    realize_gate = Some(value)"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert_eq!(field.key, "routed_gates");
+        // Should parse as a List even without brackets
+        if let ExprKind::List(gates) = &field.value.kind {
+            assert_eq!(gates.len(), 2);
+            assert!(matches!(gates[0].kind, ExprKind::Identifier(ref s) if s == "CX"));
+            assert!(matches!(gates[1].kind, ExprKind::Identifier(ref s) if s == "T"));
+        } else {
+            panic!("Expected List, got: {:?}", field.value.kind);
+        }
+    }
+}
+
+#[test]
+fn test_comma_separated_vs_bracket_list_equivalence() {
+    let input_no_brackets = r#"RouteInfo:
+    routed_gates = CX, T, Pauli
+    realize_gate = Some(value)"#;
+
+    let input_brackets = r#"RouteInfo:
+    routed_gates = [CX, T, Pauli]
+    realize_gate = Some(value)"#;
+    
+    let file1 = parse_file(input_no_brackets).unwrap();
+    let file2 = parse_file(input_brackets).unwrap();
+    
+    let BlockContent::Fields(items1) = &file1.blocks[0].content;
+    let BlockContent::Fields(items2) = &file2.blocks[0].content;
+
+    let field1 = items1.first().unwrap();
+    let field2 = items2.first().unwrap();
+
+    let BlockItem::Field(f1) = field1 else { panic!("Expected field") };
+    let BlockItem::Field(f2) = field2 else { panic!("Expected field") };
+
+    let ExprKind::List(gates1) = &f1.value.kind else { 
+        panic!("No brackets: Expected List, got: {:?}", f1.value.kind) 
+    };
+    let ExprKind::List(gates2) = &f2.value.kind else { 
+        panic!("With brackets: Expected List, got: {:?}", f2.value.kind) 
+    };
+
+    assert_eq!(gates1.len(), 3);
+    assert_eq!(gates2.len(), 3);
+
+    for (g1, g2) in gates1.iter().zip(gates2.iter()) {
+        let ExprKind::Identifier(name1) = &g1.kind else { panic!("Expected identifier") };
+        let ExprKind::Identifier(name2) = &g2.kind else { panic!("Expected identifier") };
+        assert_eq!(name1, name2);
+    }
+}

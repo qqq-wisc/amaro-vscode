@@ -174,7 +174,31 @@ fn parse_field<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, 
     let (input, _) = ws(char('='))(input)?;
     
     let val_start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    let (input, value_expr) = parse_expr(original_input, input)?;
+    let (input, first_expr) = parse_expr(original_input, input)?;
+
+    // Check for comma-separated list (e.g., routed_gates = CX, T)
+    let (input, rest_exprs) = many0(
+        |i: &'a str| {
+            let (i, _) = whitespace_handler(i)?;
+            let (i, _) = char(',')(i)?;
+            let (i, _) = whitespace_handler(i)?;
+            parse_expr(original_input, i)
+        })
+    (input)?;
+
+    // If there were commas, wrap everything into a List. Else just return the single expression.
+    let value_expr = if rest_exprs.is_empty() {
+        first_expr
+    } else {
+        let mut all_exprs = vec![first_expr];
+        all_exprs.extend(rest_exprs);
+        let val_end = input.as_ptr() as usize - original_input.as_ptr() as usize;
+        Expr::new(
+            ExprKind::List(all_exprs),
+            calc_range(original_input, val_start, val_end - val_start),
+        )
+    };
+
     let val_end = input.as_ptr() as usize - original_input.as_ptr() as usize;
     
     Ok((input, Field::new(
