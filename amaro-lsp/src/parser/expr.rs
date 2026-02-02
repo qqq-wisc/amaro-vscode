@@ -129,7 +129,6 @@ fn parse_if_expr<'a>(
         // 2. Whitespace after 'if'
         let (input, _) = whitespace_handler(input)?;
         let (input, condition) = parse_lambda_expr(original_input, input, ctx)?;
-        eprintln!("After parsing condition, next chars: {:?}", &input[..input.len().min(20)]);
 
         // 3. Handle 'then' with whitespace around it
         let (input, _) = whitespace_handler(input)?;
