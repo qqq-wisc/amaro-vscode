@@ -401,11 +401,14 @@ fn parse_postfix_expr<'a>(
 
     loop {
         if let Ok((rest, _)) = ws(char('.'))(current_input) {
-            // Check for tuple projection
+            // Tuple Projection / Dynamic Indexing with Parentheses
             if let Ok((rest_inner, _)) = tag::<_, _, Error<&str>>("(")(rest) {
-                if let Ok((rest_inner, idx_str)) = terminated(digit1, ws(char(')')))(rest_inner) {
+
+                // Tuple Projection .(0)
+                if let Ok((rest_idx, idx_str)) = terminated(digit1, ws(char(')')))(rest_inner) {
                     let idx = idx_str.parse::<usize>().unwrap_or(0);
-                    let end = rest_inner.as_ptr() as usize - original_input.as_ptr() as usize;
+                    let end = rest_idx.as_ptr() as usize - original_input.as_ptr() as usize;
+
                     base = Expr::new(
                         ExprKind::Projection {
                             index: idx,
@@ -413,9 +416,27 @@ fn parse_postfix_expr<'a>(
                         },
                         calc_range(original_input, start, end - start)
                     );
-                    current_input = rest_inner;
+                    current_input = rest_idx;
                     continue;
                 }
+
+                // Dynamic Indexing .(expr)
+                let (rest_final, index_expr) = terminated(
+                    |i| parse_expr_with_context(original_input, i, ctx),
+                    ws(char(')'))
+                )(rest_inner)?;
+
+                let end = rest_final.as_ptr() as usize - original_input.as_ptr() as usize;
+
+                base = Expr::new(
+                    ExprKind::IndexAccess {
+                        object: Box::new(base),
+                        index: Box::new(index_expr),
+                    },
+                    calc_range(original_input, start, end - start)
+                );
+                current_input = rest_final;
+                continue;
             }
 
             // Field access
@@ -452,7 +473,10 @@ fn parse_postfix_expr<'a>(
 
         // Function call
         if let Ok((rest, _)) = ws(char('('))(current_input) {
-            let (rest, args) = separated_list0(ws(char(',')), |i| parse_expr_with_context(original_input, i, ctx))(rest)?;
+            let (rest, args) = separated_list0(
+                ws(char(',')),
+                |i| parse_expr_with_context(original_input, i, ctx)
+            )(rest)?;
             let (rest, _) = ws(char(')'))(rest)?;
 
             let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
@@ -467,7 +491,7 @@ fn parse_postfix_expr<'a>(
             continue;
         }
 
-            break;
+        break;
     }
     
     Ok((current_input, base))

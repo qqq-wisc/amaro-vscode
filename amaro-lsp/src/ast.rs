@@ -271,7 +271,7 @@ impl Expr {
             ExprKind::StructLiteral { name, fields } => {
                 format!("{}{{{} fields}}", name, fields.len())
             }
-            ExprKind::FunctionCall { function, args } => {
+            ExprKind::FunctionCall { function, .. } => {
                 format!("{}(...)", function.format_summary())
             }
             ExprKind::FieldAccess { object, field } => {

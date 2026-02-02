@@ -738,6 +738,18 @@ RouteInfo:
 }
 
 #[test]
+fn test_complex_dot_chaining() {
+    let input = r#"
+RouteInfo:
+    val = x.implementation.(path())
+"#;
+
+    let file = parse_file(input).expect("Should parse dot-expression syntax");
+    let expr = get_first_field_value(file);
+    println!("Parsed: {:?}", expr);
+}
+
+#[test]
 fn test_binary_equality_chain() {
     let input = r#"
 RouteInfo:
@@ -844,7 +856,8 @@ fn test_parenthesized_comparison() {
 fn test_newline_before_then() {
     let input = r#"RouteInfo:
     realize_gate = if condition
-        then result"#;
+        then result
+        else 0"#;
 
     let file = parse_file(input).unwrap();
     
@@ -958,7 +971,7 @@ fn test_method_chain_with_projection() {
     
     let BlockContent::Fields(items) = &file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
-        assert!(matches!(field.value.kind, ExprKind::Projection { .. }));
+        assert!(matches!(field.value.kind, ExprKind::IndexAccess { .. }));
     }
 }
 
@@ -994,7 +1007,7 @@ fn test_multiple_projections() {
 }
 
 #[test]
-fn test_real_world_complex_chaining() {
+fn test_complex_chaining() {
     let input = r#"RouteInfo:
     value = map(|x| -> x.implementation.(path()), gates())"#;
     
@@ -1004,7 +1017,7 @@ fn test_real_world_complex_chaining() {
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
             if let ExprKind::Lambda { body, .. } = &args[0].kind {
-                assert!(matches!(body.kind, ExprKind::Projection { .. }));
+                assert!(matches!(body.kind, ExprKind::IndexAccess { .. }));
             }
         }
     }

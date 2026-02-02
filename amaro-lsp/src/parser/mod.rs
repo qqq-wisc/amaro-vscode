@@ -5,4 +5,4 @@ pub mod expr;
 
 pub use parser::*;
 pub use semantics::*;
-pub use utils::*;
+// pub use utils::*;
