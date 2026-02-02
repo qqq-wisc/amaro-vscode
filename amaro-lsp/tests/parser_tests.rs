@@ -6,6 +6,16 @@ use amaro_lsp::parser::{
 };
 use amaro_lsp::ast::*;
 
+// Helper to extract first field's value expression from parsed file
+fn get_first_field_value(file: AmaroFile) -> Expr {
+    let block = &file.blocks[0];
+    let BlockContent::Fields(items) = &block.content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        return field.value.clone();
+    }
+    panic!("Test Setup Error: Expected a block with at least one field");
+}
+
 // 1. Basic Parsing Tests (Identifiers & Rust Embedding)
 
 #[test]
@@ -644,5 +654,358 @@ fn test_comma_separated_vs_bracket_list_equivalence() {
         let ExprKind::Identifier(name1) = &g1.kind else { panic!("Expected identifier") };
         let ExprKind::Identifier(name2) = &g2.kind else { panic!("Expected identifier") };
         assert_eq!(name1, name2);
+    }
+}
+
+#[test]
+fn test_if_precedence_fix() {
+    let input = r#"
+RouteInfo:
+    apply = if (Gate.gate_type) == CX then DoSomething else Skip
+"#;
+
+    let file = parse_file(input).expect("Should parse valid if-expression");
+    let expr = get_first_field_value(file);
+
+    if let ExprKind::IfThenElse { condition, .. } = expr.kind {
+        match condition.kind {
+            ExprKind::BinaryOp { op, .. } => assert_eq!(op, BinaryOperator::Eq),
+            _ => panic!("FAILED: Parser stopped early! It didn't see the '==' inside the if-condition."),
+        }
+    } else {
+        panic!("Expected IfThenElse expression");
+    }
+}
+
+#[test]
+fn test_binary_op_multiline() {
+    let input = r#"
+RouteInfo:
+    check = Gate.type 
+            == 
+            CX
+"#;
+    let file = parse_file(input).expect("Should handle newlines in binary ops");
+    let expr = get_first_field_value(file);
+    
+    match expr.kind {
+        ExprKind::BinaryOp { op, .. } => assert_eq!(op, BinaryOperator::Eq),
+        _ => panic!("Expected BinaryOp eq"),
+    }
+}
+
+#[test]
+fn test_if_multiline_structure() {
+    let input = r#"
+RouteInfo:
+    res = if Gate.is_valid
+          then 
+            Proceed
+          else 
+            Stop
+"#;
+    assert!(parse_file(input).is_ok(), "Failed to parse multiline If/Then/Else");
+}
+
+#[test]
+fn test_nested_logic_parens() {
+    let input = r#"
+RouteInfo:
+    val = (A == B) && (C != D)
+"#;
+    let file = parse_file(input).expect("Should parse nested logic");
+    let expr = get_first_field_value(file);
+    
+    match expr.kind {
+        ExprKind::BinaryOp { op, .. } => assert_eq!(op, BinaryOperator::And),
+        _ => panic!("Precedence logic failed. Top level should be &&"),
+    }
+}
+
+#[test]
+fn test_simple_dot_access() {
+    let input = r#"
+RouteInfo:
+    val = State.map
+"#;
+    let file = parse_file(input).expect("Should parse dot access");
+    let expr = get_first_field_value(file);
+    
+    match expr.kind {
+        ExprKind::FieldAccess { field, .. } => assert_eq!(field, "map"),
+        _ => panic!("Expected FieldAccess"),
+    }
+}
+
+#[test]
+fn test_binary_equality_chain() {
+    let input = r#"
+RouteInfo:
+    x = a == b == c
+"#;
+    let result = parse_file(input);
+    assert!(result.is_ok(), "Chained operators shouldn't crash the parser");
+}
+
+#[test]
+fn test_function_call_parsing() {
+    let input = r#"
+RouteInfo:
+    x = all_paths(arch, 10)
+"#;
+    let file = parse_file(input).expect("Should parse function call");
+    let expr = get_first_field_value(file);
+    
+    if let ExprKind::FunctionCall { args, .. } = expr.kind {
+        assert_eq!(args.len(), 2);
+    } else {
+        panic!("Expected FunctionCall");
+    }
+}
+
+#[test]
+fn test_comma_separated_list_no_brackets() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX, T
+"#;
+    let file = parse_file(input).expect("Should parse list");
+    let expr = get_first_field_value(file);
+    
+    if let ExprKind::List(items) = expr.kind {
+        assert_eq!(items.len(), 2);
+    } else {
+        panic!("Phase 2: Expected List, got {:?}", expr.kind);
+    }
+}
+
+#[test]
+fn test_comparison_in_if_condition() {
+    let input = r#"RouteInfo:
+    realize_gate = if (Gate.gate_type()) == CX then Some(result) else None"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        if let ExprKind::IfThenElse { condition, .. } = &field.value.kind {
+            if let ExprKind::BinaryOp { op, left, right } = &condition.kind {
+                assert_eq!(*op, BinaryOperator::Eq);
+                assert!(matches!(left.kind, ExprKind::FunctionCall { .. }));
+                assert!(matches!(right.kind, ExprKind::Identifier(_)));
+            } else {
+                panic!("Expected BinaryOp in condition, got: {:?}", condition.kind);
+            }
+        } else {
+            panic!("Expected IfThenElse");
+        }
+    }
+}
+
+#[test]
+fn test_nested_comparisons() {
+    let input = r#"TransitionInfo:
+    cost = if x == y && a < b then 1.0 else 0.0"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        if let ExprKind::IfThenElse { condition, .. } = &field.value.kind {
+            if let ExprKind::BinaryOp { op, left, right } = &condition.kind {
+                assert_eq!(*op, BinaryOperator::And);
+                // Left should be x == y
+                assert!(matches!(left.kind, ExprKind::BinaryOp { op: BinaryOperator::Eq, .. }));
+                // Right should be a < b
+                assert!(matches!(right.kind, ExprKind::BinaryOp { op: BinaryOperator::Lt, .. }));
+            } else {
+                panic!("Expected BinaryOp with And");
+            }
+        }
+    }
+}
+
+#[test]
+fn test_parenthesized_comparison() {
+    let input = r#"RouteInfo:
+    value = if (x == y) then true else false"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        if let ExprKind::IfThenElse { condition, .. } = &field.value.kind {
+            assert!(matches!(condition.kind, ExprKind::BinaryOp { op: BinaryOperator::Eq, .. }));
+        }
+    }
+}
+
+#[test]
+fn test_newline_before_then() {
+    let input = r#"RouteInfo:
+    realize_gate = if condition
+        then result"#;
+
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    assert_eq!(items.len(), 1, "Should parse exactly one field");
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert_eq!(field.key, "realize_gate");
+        assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
+    }
+}
+
+#[test]
+fn test_newline_before_else() {
+    let input = r#"TransitionInfo:
+    cost = if x == y then 1.0
+        else 0.0"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
+    }
+}
+
+#[test]
+fn test_newline_before_arrow_in_lambda() {
+    let input = r#"RouteInfo:
+    realize_gate = map(|x|
+        -> result, list)"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
+            assert!(matches!(args[0].kind, ExprKind::Lambda { .. }));
+        }
+    }
+}
+
+#[test]
+fn test_newline_before_in_keyword() {
+    let input = r#"TransitionInfo:
+    cost = let x = 1.0
+        in x"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert!(matches!(field.value.kind, ExprKind::LetBinding { .. }));
+    }
+}
+
+#[test]
+fn test_generic_type_in_struct_def() {
+    let input = r#"RouteInfo:
+    GateRealization{path : Vec<Location>}
+    realize_gate = Some(value)"#;
+
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::StructDef(struct_def)) = items.first() {
+        assert_eq!(struct_def.name, "GateRealization");
+        assert_eq!(struct_def.fields.len(), 1);
+
+        let param = &struct_def.fields[0];
+        if let TypeAnnotation::Generic(base, args) = &param.type_annotation {
+            assert_eq!(base, "Vec");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], TypeAnnotation::Simple(ref s) if s == "Location"));
+        } else {
+            panic!("Expected Generic type annotation");
+        }
+    }
+}
+
+#[test]
+fn test_nested_generics() {
+    let input = r#"ArchInfo:
+    Arch{rates : Vec<Vec<Float>>}
+    get_locations = []"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::StructDef(struct_def)) = items.first() {
+        let param = &struct_def.fields[0];
+        // Should be Vec<Vec<Float>>
+        if let TypeAnnotation::Generic(outer, outer_args) = &param.type_annotation {
+            assert_eq!(outer, "Vec");
+            if let TypeAnnotation::Generic(inner, inner_args) = &outer_args[0] {
+                assert_eq!(inner, "Vec");
+                assert!(matches!(inner_args[0], TypeAnnotation::Simple(ref s) if s == "Float"));
+            } else {
+                panic!("Expected nested generic");
+            }
+        }
+    }
+}
+
+
+#[test]
+fn test_method_chain_with_projection() {
+    let input = r#"TransitionInfo:
+    value = x.implementation.(path())"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert!(matches!(field.value.kind, ExprKind::Projection { .. }));
+    }
+}
+
+#[test]
+fn test_chained_field_and_method_calls() {
+    let input = r#"RouteInfo:
+    value = obj.field1.method1().field2.method2(arg)"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        assert!(matches!(field.value.kind, ExprKind::FunctionCall { .. }));
+    }
+}
+
+#[test]
+fn test_multiple_projections() {
+    let input = r#"TransitionInfo:
+    value = tuple.(0).(1)"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        if let ExprKind::Projection { tuple, index } = &field.value.kind {
+            assert_eq!(*index, 1);
+            assert!(matches!(tuple.kind, ExprKind::Projection { .. }));
+        } else {
+            panic!("Expected projection");
+        }
+    }
+}
+
+#[test]
+fn test_real_world_complex_chaining() {
+    let input = r#"RouteInfo:
+    value = map(|x| -> x.implementation.(path()), gates())"#;
+    
+    let file = parse_file(input).unwrap();
+    
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
+            if let ExprKind::Lambda { body, .. } = &args[0].kind {
+                assert!(matches!(body.kind, ExprKind::Projection { .. }));
+            }
+        }
     }
 }

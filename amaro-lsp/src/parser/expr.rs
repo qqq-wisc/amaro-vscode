@@ -69,112 +69,6 @@ fn parse_expr_with_context<'a>(
     result
 }
 
-// fn parse_let_expr<'a>(
-//     original_input: &'a str, 
-//     input: &'a str,
-//     ctx: &mut ParseContext
-// ) -> IResult<&'a str, Expr> {
-//     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
-//     let (input, is_let) = opt(ws(tag("let")))(input)?;
-    
-//     if is_let.is_some() {
-//         let (input, name) = ws(parse_non_keyword_identifier)(input)?;
-//         let (input, _) = ws(char('='))(input)?;
-//         let (input, value) = parse_if_expr(original_input, input, ctx)?;
-        
-//         let (input, _) = whitespace_handler(input)?;
-//         let (input, _) = tag("in")(input)?;
-
-//         //let (input, _) = ws(tag("in"))(input)?;
-//         let (input, body) = parse_expr_with_context(original_input, input, ctx)?;
-        
-//         let end = input.as_ptr() as usize - original_input.as_ptr() as usize;
-        
-//         Ok((input, Expr::new(
-//             ExprKind::LetBinding {
-//                 name: name.to_string(),
-//                 value: Box::new(value),
-//                 body: Box::new(body),
-//             },
-//             calc_range(original_input, start, end - start)
-//         )))
-//     } else {
-//         parse_if_expr(original_input, input, ctx)
-//     }
-// }
-
-// fn parse_if_expr<'a>(
-//     original_input: &'a str, 
-//     input: &'a str,
-//     ctx: &mut ParseContext
-// ) -> IResult<&'a str, Expr> {
-//     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
-//     let (input, is_if) = opt(ws(tag("if")))(input)?;
-    
-//     if is_if.is_some() {
-//         let (input, condition) = parse_lambda_expr(original_input, input, ctx)?;
-
-//         let (input, _) = whitespace_handler(input)?;
-//         let (input, _) = tag("then")(input)?;
-//         // let (input, _) = ws(tag("then"))(input)?;
-
-//         let (input, then_branch) = parse_if_expr(original_input, input, ctx)?;
-
-//         let (input, _) = whitespace_handler(input)?;
-//         let (input, _) = tag("else")(input)?;
-//         // let (input, _) = ws(tag("else"))(input)?;
-
-//         let (input, else_branch) = parse_if_expr(original_input, input, ctx)?;
-        
-//         let end = input.as_ptr() as usize - original_input.as_ptr() as usize;
-        
-//         Ok((input, Expr::new(
-//             ExprKind::IfThenElse {
-//                 condition: Box::new(condition),
-//                 then_branch: Box::new(then_branch),
-//                 else_branch: Box::new(else_branch),
-//             },
-//             calc_range(original_input, start, end - start)
-//         )))
-//     } else {
-//         parse_lambda_expr(original_input, input, ctx)
-//     }
-// }
-
-// fn parse_lambda_expr<'a>(
-//     original_input: &'a str, 
-//     input: &'a str,
-//     ctx: &mut ParseContext
-// ) -> IResult<&'a str, Expr> {
-//     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
-//     let (input, is_lambda) = opt(char('|'))(input)?;
-    
-//     if is_lambda.is_some() {
-//         let (input, params) = separated_list0(ws(char(',')), parse_non_keyword_identifier)(input)?;
-//         let (input, _) = ws(char('|'))(input)?;
-
-//         let (input, _) = whitespace_handler(input)?;
-//         let (input, _) = tag("->")(input)?;
-//         // let (input, _) = ws(tag("->"))(input)?;
-//         let (input, body) = parse_expr_with_context(original_input, input, ctx)?;
-        
-//         let end = input.as_ptr() as usize - original_input.as_ptr() as usize;
-        
-//         Ok((input, Expr::new(
-//             ExprKind::Lambda {
-//                 params: params.into_iter().map(|s| s.to_string()).collect(),
-//                 body: Box::new(body),
-//             },
-//             calc_range(original_input, start, end - start)
-//         )))
-//     } else {
-//         parse_logical_or_expr(original_input, input, ctx)
-//     }
-// }
-
 fn parse_let_expr<'a>(
     original_input: &'a str, 
     input: &'a str,
@@ -235,6 +129,7 @@ fn parse_if_expr<'a>(
         // 2. Whitespace after 'if'
         let (input, _) = whitespace_handler(input)?;
         let (input, condition) = parse_lambda_expr(original_input, input, ctx)?;
+        eprintln!("After parsing condition, next chars: {:?}", &input[..input.len().min(20)]);
 
         // 3. Handle 'then' with whitespace around it
         let (input, _) = whitespace_handler(input)?;
