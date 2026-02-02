@@ -57,6 +57,24 @@ After running `npm run watch`:
 2. A new VS Code window will open with the **Amaro extension loaded**.
 3. Open any `.qmrl` file to see highlighting, symbols, and diagnostics.
 
+## Development & Testing
+
+If you are modifying the parser or language server logic, use the following commands to verify your changes.
+
+**Running Unit Tests**
+The project includes a comprehensive suite of unit tests for the parser, covering syntax, precedence, and complex expressions.
+```bash
+cd amaro-lsp
+cargo test
+```
+
+**Clean Build** To remove all build artifacts and compile from scratch (useful if you encounter strange caching issues):
+
+```bash
+cd amaro-lsp
+cargo clean && cargo build
+```
+
 ## Example Code
 
 This extension provides highlighting, navigation, and error checking for Amaro files like this:
