@@ -93,9 +93,8 @@ pub fn parse_non_keyword_identifier(input: &str) -> IResult<&str, &str> {
 // Type Annotations
 fn parse_type_annotation(input: &str) -> IResult<&str, TypeAnnotation> {
     alt((
-        parse_generic_type,
-        parse_tuple_type,
-        parse_simple_type,
+        parse_function_type,
+        parse_atomic_type,
     ))(input)
 }
 
@@ -353,6 +352,26 @@ pub fn parse_block<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a s
     }
 
     Ok((input, None))
+}
+
+fn parse_atomic_type(input: &str) -> IResult<&str, TypeAnnotation> {
+    alt((
+        parse_generic_type,
+        parse_tuple_type,
+        parse_simple_type,
+    ))(input)
+}
+
+// Parse function
+fn parse_function_type(input: &str) -> IResult<&str, TypeAnnotation> {
+    let (input, params) = separated_list1(ws(char(',')), parse_atomic_type)(input)?;
+    let (input, _) = ws(alt((tag("->"), tag("→"))))(input)?;
+
+    let (input, return_type) = parse_type_annotation(input)?;
+    Ok((input, TypeAnnotation::Function {
+        params,
+        return_type: Box::new(return_type),
+    }))
 }
 
 pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {

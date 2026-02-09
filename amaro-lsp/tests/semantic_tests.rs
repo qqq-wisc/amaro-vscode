@@ -5,11 +5,11 @@ use tower_lsp::lsp_types::DiagnosticSeverity;
 const MOCK_MANDATORY_BLOCKS: &str = r#"
 RouteInfo:
     routed_gates = CX
-    realize_gate = Some(value)
+    realize_gate = []
 
 TransitionInfo:
     cost = 1.0
-    apply = identity
+    apply = []
 "#;
 
 // Core Semantic Tests
@@ -67,10 +67,10 @@ fn test_duplicate_blocks_error() {
     let input = r#"
 RouteInfo:
     routed_gates = CX
-    realize_gate = Some(value)
+    realize_gate = []
 TransitionInfo:
     cost = 1.0
-    apply = identity
+    apply = []
 RouteInfo:
     routed_gates = T
     realize_gate = None
@@ -93,7 +93,7 @@ fn test_duplicate_and_missing_combined() {
     let input = r#"
 RouteInfo:
     routed_gates = CX
-    realize_gate = Some(value)
+    realize_gate = []
 RouteInfo:
     routed_gates = T
     realize_gate = None
@@ -139,12 +139,12 @@ fn test_struct_def_in_block() {
 RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location}
-    realize_gate = Some(value)
+    realize_gate = []
 
 TransitionInfo:
     Transition{edge : (Location, Location)}
     cost = 1.0
-    apply = identity
+    apply = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -171,10 +171,10 @@ fn test_valid_gates_no_warning() {
     let input = r#"
 RouteInfo:
     routed_gates = CX
-    realize_gate = Some(value)
+    realize_gate = []
 TransitionInfo:
     cost = 1.0
-    apply = identity
+    apply = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -184,6 +184,11 @@ TransitionInfo:
         .filter(|d| d.severity == Some(DiagnosticSeverity::WARNING))
         .collect();
     assert!(warnings.is_empty(), "Valid gate CX should not produce warnings");
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(errors.is_empty(), "Should have no errors, got: {:?}", errors);
 }
 
 #[test]
@@ -206,6 +211,11 @@ TransitionInfo:
         
     assert_eq!(warnings.len(), 1, "Should warn about InvalidGate");
     assert!(warnings[0].message.contains("InvalidGate"));
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(errors.iter().any(|d| d.message.contains("Undefined variable")));
 }
 
 #[test]
@@ -249,6 +259,12 @@ TransitionInfo:
         
     assert_eq!(warnings.len(), 1, "Should warn only about BadGate");
     assert!(warnings[0].message.contains("BadGate"));
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(!errors.is_empty(), "Should have errors because BadGate is undefined");
+    assert!(errors.iter().any(|d| d.message.contains("Undefined variable")), "Should report BadGate as undefined");
 }
 
 #[test]
@@ -257,11 +273,11 @@ fn test_semantic_checks_work_with_bracket_syntax() {
     let input = r#"
     RouteInfo[
         routed_gates = CX
-        realize_gate = Some(value)
+        realize_gate = []
     ]
     TransitionInfo[
         cost = 1.0
-        apply = identity
+        apply = []
     ]
     "#;
 

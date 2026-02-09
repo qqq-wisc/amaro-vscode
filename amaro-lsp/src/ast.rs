@@ -74,6 +74,10 @@ pub enum TypeAnnotation {
     Simple(String),
     Generic(String, Vec<TypeAnnotation>),
     Tuple(Vec<TypeAnnotation>),
+    Function {
+        params: Vec<TypeAnnotation>,
+        return_type: Box<TypeAnnotation>,
+    },
 }
 
 #[derive(Debug, Clone)]
