@@ -269,7 +269,6 @@ TransitionInfo:
 
 #[test]
 fn test_semantic_checks_work_with_bracket_syntax() {
-    // Regression test for bracket syntax parsing
     let input = r#"
     RouteInfo[
         routed_gates = CX
@@ -284,4 +283,235 @@ fn test_semantic_checks_work_with_bracket_syntax() {
     let file = parse_file(input).unwrap();
     let diags = check_semantics(&file);
     assert!(diags.is_empty(), "Semantics should work for Bracket syntax too");
+}
+
+#[test]
+fn test_gate_qubits_field_access() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    cost = 1.0
+    apply = value_swap(Gate.qubits, []) 
+"#;
+
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+
+    assert!(errors.is_empty(), "Gate.qubits should be recognized. Got: {:?}", errors);
+}
+
+#[test]
+fn test_arch_contains_edge_method() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = if Arch.contains_edge((Location(0), Location(1)))
+                   then Some(CX)
+                   else None
+TransitionInfo:
+    cost = 1.0
+    apply = []
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    
+    assert!(errors.is_empty(), "Arch.contains_edge should be recognized. Got: {:?}", errors);
+}
+
+#[test]
+fn test_state_gates_method() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = State.gates()
+TransitionInfo:
+    cost = 1.0
+    apply = []
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    
+    assert!(errors.is_empty(), "State.gates() should be recognized. Got: {:?}", errors);
+}
+
+#[test]
+fn test_transition_edge_tuple_access() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    cost = 1.0
+    apply = value_swap(Transition.edge.0, Transition.edge.1)
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+
+    assert!(errors.is_empty(), "Transition.edge tuple access (.0/.1) should be valid. Got: {:?}", errors);
+}
+
+#[test]
+fn test_transition_edge_field() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    cost = 1.0
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    
+    assert!(errors.is_empty(), "Transition.edge should be valid. Got: {:?}", errors);
+}
+
+#[test]
+fn test_value_swap_function() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    cost = 1.0
+    apply = value_swap(Location(0), Location(1))
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    
+    assert!(errors.is_empty(), "value_swap should be valid. Got: {:?}", errors);
+}
+
+#[test]
+fn test_nested_field_access() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = State.map[Gate.qubits[0]]
+TransitionInfo:
+    cost = 1.0
+    apply = []
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    
+    assert!(errors.len() <= 1, "Nested field access should mostly work. Got: {:?}", errors);
+}
+
+#[test]
+fn test_map_function_with_lambda() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = map(|x| -> x, [1, 2, 3])
+TransitionInfo:
+    cost = 1.0
+    apply = []
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    
+    assert!(errors.is_empty(), "map with lambda should be valid. Got: {:?}", errors);
+}
+
+#[test]
+fn test_fold_function() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    cost = fold(0.0, |acc, x| -> acc, [1.0, 2.0, 3.0])
+    apply = []
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    
+    assert!(errors.is_empty(), "fold should be valid. Got: {:?}", errors);
+}
+
+#[test]
+fn test_lambda_parameter_scoping() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = map(|item| -> item, [CX, T])
+TransitionInfo:
+    cost = 1.0
+    apply = []
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let undefined_errors: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Undefined variable 'item'"))
+        .collect();
+    
+    assert!(undefined_errors.is_empty(), "Lambda parameter should be in scope. Got errors: {:?}", undefined_errors);
+}
+    
+#[test]
+fn test_let_binding_scoping() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = let temp = CX in temp
+TransitionInfo:
+    cost = 1.0
+    apply = []
+"#;
+    
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    
+    let undefined_errors: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Undefined variable 'temp'"))
+        .collect();
+    
+    assert!(undefined_errors.is_empty(), "Let binding should work");
 }

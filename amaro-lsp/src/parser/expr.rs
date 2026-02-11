@@ -438,8 +438,8 @@ fn parse_postfix_expr<'a>(
                 continue;
             }
 
-            // Field access
-            if let Ok((rest_inner, field)) = parse_identifier(rest) {
+            // Field access or Tuple Indexing
+            if let Ok((rest_inner, field)) = alt((parse_identifier, digit1))(rest) {
                 let end = rest_inner.as_ptr() as usize - original_input.as_ptr() as usize;
                 base = Expr::new(
                     ExprKind::FieldAccess {

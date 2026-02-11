@@ -4,12 +4,20 @@
 
 ## Features
 
+### Advanced Semantic Analysis (New in 0.2.0)
+The 0.2.0 release introduces a powerful semantic analyzer capable of validating complex quantum routing logic:
+* **Type Unification:** Seamlessly handles both property access (`State.map`) and method calls (`State.map()`) interchangeably.
+* **Control Flow Validation:** Ensures type consistency across `if-then-else` branches and supports nested `let...in` bindings.
+* **Vector Operations:** Built-in support for standard vector methods (`push`, `pop`, `extend`) and tuple indexing (`edge.0`).
+* **Deep Type Checking:** Recursively validates generic types (e.g., `Vec<Vec<Location>>`) and custom Struct compatibility.
+
 ### Syntax Highlighting
 Full-color syntax highlighting for the Amaro language structure, including:
 * **Blocks:** `GateRealization`, `Transition`, `Architecture`, `Step`.
 * **Info Definitions:** `RouteInfo:`, `TransitionInfo:`, `ArchInfo:`.
 * **Embedded Rust:** Correctly highlights Rust code inside `{{ ... }}` blocks.
 * **Quantum Types:** Special highlighting for `CX`, `T`, `Pauli`, and `Location`.
+* **Smart Parsing:** Correctly parses integers as field names for tuple access (e.g., `transition.edge.0`).
 
 ### Language Server Protocol (LSP)
 Includes a custom Rust-based Language Server (`amaro-lsp`) that provides:
@@ -82,14 +90,23 @@ This extension provides highlighting, navigation, and error checking for Amaro f
 ```amaro
 RouteInfo:
     routed_gates = CX
-    realize_gate = Some(value)
-
-    // Struct definitions are supported inside blocks
-    GateRealization { u: Location, v: Location }
+    
+    // Complex logic with nested bindings and vector operations
+    realize_gate = 
+        if (Gate.gate_type()) == CX 
+        then 
+            (let v = Vec() in
+             let v2 = v.push(Location(0)) in
+             let v3 = v.extend(v2) in
+             // Returns a valid Vector of Locations
+             all_paths(Arch, State.map[0], State.map[1], v3))
+        else 
+            Vec()
 
 TransitionInfo:
+    // Tuple indexing supported (.0, .1)
+    apply = value_swap(Transition.edge.0, Transition.edge.1)
     cost = 1.0
-    apply = identity
 
 {{
     // Embedded Rust code is parsed and ignored by the Amaro validator
@@ -104,7 +121,18 @@ TransitionInfo:
 * **Type Checking:** Advanced type checking (e.g., validating that `routed_gates` is assigned a valid Gate type) is currently in early development.
 
 ## Release Notes
-**0.0.1**
+**0.2.0**
+* **NISQ Support:** Full support for advanced routing logic, including vector manipulation (`push`, `pop`, `extend`) and helper functions (`all_paths`).
+* **Core Parser:**
+    * **Tuple Indexing:** Enabled support for direct integer access on tuples (e.g., `transition.edge.0`).
+    * **Complex Control Flow:** Fixed parsing of nested `let` bindings inside `if-then-else` blocks.
+* **Semantic Analysis:**
+    * **Unified Access:** Properties and zero-argument functions (e.g., `State.map` vs `State.map()`) are now interchangeable.
+    * **Type Safety:** Enforced strict type compatibility between `then` and `else` branches to prevent runtime errors.
+    * **Type Equivalence:** Added explicit compatibility checks for `Arch`, `State`, and `Gate` types.
+* **Fixes:** Resolved a critical parser bug where lines following complex struct definitions were being ignored.
+
+**0.1.0**
 * Initial release.
 * Added Grammar for `.qmrl `files.
 * Added Language Client connection to `amaro-lsp`.

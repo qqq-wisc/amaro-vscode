@@ -43,58 +43,100 @@ pub enum Type {
 
 // Symbol Table
 pub struct SymbolTable {
-    bindings: HashMap<String, Type>,
+    // bindings: HashMap<String, Type>,
     scopes: Vec<HashMap<String, Type>>,
 }
 
 impl SymbolTable {
     pub fn new() -> Self {
-        let mut table = SymbolTable {
-            bindings: HashMap::new(),
-            scopes: Vec::new(),
-        };
+        let mut global_scope = HashMap::new();
+        global_scope.insert("Arch".to_string(), Type::ArchT);
+        global_scope.insert("arch".to_string(), Type::ArchT);
+        global_scope.insert("State".to_string(), Type::StateT);
+        global_scope.insert("Gate".to_string(), Type::Gate);
+        global_scope.insert("Transition".to_string(), Type::Struct { 
+            name: "Transition".to_string(), 
+            fields: HashMap::new() 
+        });
 
-        table.add_built_in_types("Arch", Type::ArchT);
-        table.add_built_in_types("State", Type::StateT);
-        table.add_built_in_types("Instr", Type::InstrT);
-        table.add_built_in_types("Gate", Type::Gate);
+        for gate in ["CX", "T", "Pauli", "PauliMeasurement", "H", "CZ", "X", "Y", "Z", "S", "Sdg", "Tdg", "RX", "RY", "RZ"] {
+            global_scope.insert(gate.to_string(), Type::Gate);
+        }
 
-        table.add_built_in_types("map", Type::Function {
-            params: vec![
-                Type::Function {
-                    params: vec![Type::Unknown],
-                    return_type: Box::new(Type::Unknown),
-                },
-                Type::Vec(Box::new(Type::Unknown)),
-            ],
+        // Built-in functions
+        global_scope.insert("value_swap".to_string(), Type::Function {
+            params: vec![Type::Unknown, Type::Unknown],
+            return_type: Box::new(Type::Tuple(vec![Type::Unknown, Type::Unknown])),
+        });
+
+        global_scope.insert("map".to_string(), Type::Function {
+            params: vec![Type::Unknown, Type::Vec(Box::new(Type::Unknown))], 
             return_type: Box::new(Type::Vec(Box::new(Type::Unknown))),
         });
 
-        table.add_built_in_types("fold", Type::Function {
+        global_scope.insert("Location".to_string(), Type::Function {
+            params: vec![Type::Int],
+            return_type: Box::new(Type::Location),
+        });
+
+        global_scope.insert("fold".to_string(), Type::Function {
             params: vec![
                 Type::Unknown,
-                Type::Function {
-                    params: vec![Type::Unknown, Type::Unknown],
-                    return_type: Box::new(Type::Unknown),
-                },
+                Type::Unknown,
                 Type::Vec(Box::new(Type::Unknown)),
             ],
             return_type: Box::new(Type::Unknown),
         });
 
-        for func in &["push", "pop", "extend", "values", "all_paths", 
-                      "steiner_trees", "horizontal_neighbors", "vertical_neighbors",
-                      "identity_application", "value_swap", "contains_edge"] {
-            table.add_built_in_types(func, Type::Function {
-                params: vec![Type::Unknown],
-                return_type: Box::new(Type::Unknown),
-            });
-        }
-        table
-    }
+        global_scope.insert("GateRealization".to_string(), Type::Struct {
+            name: "GateRealization".to_string(),
+            fields: HashMap::new(),
+        });
 
-    fn add_built_in_types(&mut self, name: &str, ty: Type) {
-        self.bindings.insert(name.to_string(), ty);
+        global_scope.insert("Vec".to_string(), Type::Function {
+            params: vec![], 
+            return_type: Box::new(Type::Vec(Box::new(Type::Unknown))),
+        });
+
+        global_scope.insert("values".to_string(), Type::Function {
+            params: vec![Type::QubitMap], 
+            return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+        });
+
+        global_scope.insert("vertical_neighbors".to_string(), Type::Function {
+            params: vec![Type::Location, Type::Int, Type::Int], 
+            return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+        });
+        global_scope.insert("horizontal_neighbors".to_string(), Type::Function {
+            params: vec![Type::Location, Type::Int], 
+            return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+        });
+
+        global_scope.insert("step".to_string(), Type::Int);
+
+        global_scope.insert("all_paths".to_string(), Type::Function {
+            params: vec![
+                Type::ArchT,
+                Type::Vec(Box::new(Type::Location)),
+                Type::Vec(Box::new(Type::Location)),
+                Type::Vec(Box::new(Type::Location))
+            ],
+            return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))),
+        });
+
+        global_scope.insert("identity_application".to_string(), Type::Function {
+            params: vec![Type::Unknown],
+            return_type: Box::new(Type::Unknown),
+        });
+
+        global_scope.insert("path".to_string(), Type::Function {
+            params: vec![],
+            return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+        });
+
+        SymbolTable {
+            scopes: vec![global_scope],
+        }
     }
 
     pub fn enter_scope(&mut self) {
@@ -102,14 +144,14 @@ impl SymbolTable {
     }
 
     pub fn exit_scope(&mut self) {
-        self.scopes.pop();
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
     }
 
     pub fn bind(&mut self, name: String, ty: Type) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name, ty);
-        } else {
-            self.bindings.insert(name, ty);
         }
     }
 
@@ -119,6 +161,6 @@ impl SymbolTable {
                 return Some(ty);
             }
         }
-        self.bindings.get(name)
+        None
     }
 }

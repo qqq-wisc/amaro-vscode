@@ -149,10 +149,6 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 return Type::Gate;
             }
 
-            if name == "Location" {
-                return Type::Location;
-            }
-
             sym_table.lookup(name).cloned().unwrap_or_else(|| {
                 diagnostics.push(Diagnostic {
                     range: expr.range,
@@ -259,10 +255,14 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                         });
                         return *return_type;
                     }
-
                     for (i, (param_type, arg)) in params.iter().zip(args).enumerate() {
                         let arg_type = infer_expr_type(arg, sym_table, diagnostics);
-                        if !types_compatible(param_type, &arg_type) {
+                        
+                        // Following Logic
+                        // 1. If param_type Unknown, Accept
+                        // 2. If arg_type Unknown, Accept (Avoid Cascading Errors)
+                        // 3. Otherwise, Check Compatibility
+                        if *param_type != Type::Unknown && arg_type != Type::Unknown && !types_compatible(param_type, &arg_type) {
                             diagnostics.push(Diagnostic {
                                 range: arg.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
@@ -273,6 +273,7 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                     }
                     *return_type
                 },
+                Type::Unknown => Type::Unknown, // Avoid Cascading Errors
                 _ => {
                     diagnostics.push(Diagnostic {
                         range: function.range,
@@ -284,25 +285,144 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 }
             }
         },
-
+        
         ExprKind::FieldAccess { object, field } => {
             let obj_type = infer_expr_type(object, sym_table, diagnostics);
             match obj_type {
+                Type::Vec(inner) => {
+                    if field == "push" {
+                        Type::Function {
+                            params: vec![*inner.clone()],
+                            return_type: Box::new(Type::Vec(inner.clone())),
+                        }
+                    } else if field == "pop" {
+                        Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Option(inner.clone()))
+                        }
+                    } else if field == "extend" {
+                        Type::Function {
+                            params: vec![Type::Vec(inner.clone())],
+                            return_type: Box::new(Type::Vec(inner.clone())),
+                        }
+                    } else if field == "is_empty" {
+                        Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Bool),
+                        }
+                    } else if field == "contains" {
+                        Type::Function {
+                            params: vec![*inner.clone()],
+                            return_type: Box::new(Type::Bool),
+                        }
+                    } else if field == "len" {
+                        Type::Int
+                    } else {
+                        Type::Unknown
+                    }
+                },
+                Type::Struct { fields, .. } => {
+                    fields.get(field).cloned().unwrap_or(Type::Unknown)
+                },
+                Type::Tuple(elements) => {
+                    if let Ok(idx) = field.parse::<usize>() {
+                        elements.get(idx).cloned().unwrap_or(Type::Unknown)
+                    } else {
+                        Type::Unknown
+                    }
+                },
+
+                // Built-in Types
                 Type::ArchT => {
                     match field.as_str() {
                         "width" | "height" => Type::Int,
-                        "edges" => Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location]))),
+                        "edges" => Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location])))),
+                        },
                         "succ_rates" => Type::Vec(Box::new(Type::Vec(Box::new(Type::Float)))),
+                        "contains_edge" => Type::Function {
+                            params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
+                            return_type: Box::new(Type::Bool),
+                        },
+                        "magic_state_qubits" | "alg_qubits" => Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Vec(Box::new(Type::Location)))
+                        },
                         _ => Type::Unknown,
                     }
                 },
                 Type::StateT => {
                     match field.as_str() {
                         "map" => Type::QubitMap,
+                        "gates" => Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Vec(Box::new(Type::Gate))),
+                        },
+                        "implemented_gates" => Type::Unknown,
                         _ => Type::Unknown,
                     }
                 },
+                Type::Gate => {
+                    match field.as_str() {
+                        "qubits" => Type::Vec(Box::new(Type::Int)),
+                        "gate_type" => Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Gate),
+                        },
+                        "implementation" => Type::Unknown,
+                        _ => Type::Unknown,
+                    }
+                },
+                Type::Unknown => Type::Unknown,
                 _ => Type::Unknown,
+            }
+        },
+
+        ExprKind::StructLiteral { name, fields } => {
+            let mut field_types = HashMap::new();
+            for (key, value) in fields {
+                let val_type = infer_expr_type(value, sym_table, diagnostics);
+                field_types.insert(key.clone(), val_type);
+            }
+            Type::Struct {
+                name: name.clone(),
+                fields: field_types,
+            }
+        },
+
+        ExprKind::IndexAccess { object, index } => {
+            let obj_type = infer_expr_type(object, sym_table, diagnostics);
+            let idx_type = infer_expr_type(index, sym_table, diagnostics);
+
+            if !types_compatible(&idx_type, &Type::Int) {
+                diagnostics.push(Diagnostic {
+                    range: index.range,
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    message: "Index must be of type 'Int'.".to_string(),
+                    ..Default::default()
+                });
+            }
+
+            // If object is a 0-arg function, auto-call it
+            let actual_type = match obj_type {
+                Type::Function { params, return_type } if params.is_empty() => *return_type,
+                other => other,
+            };
+
+            match actual_type {
+                Type::Vec(inner) => *inner,
+                Type::QubitMap => Type::Location,
+                Type::Unknown => Type::Unknown,
+                _ => {
+                    diagnostics.push(Diagnostic {
+                        range: object.range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        message: "Attempted to index a non-indexable type.".to_string(),
+                        ..Default::default()
+                    });
+                    Type::Unknown
+                }
             }
         },
 
@@ -311,6 +431,11 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
 }
 
 fn types_compatible(t1: &Type, t2: &Type) -> bool {
+    // Avoid Cascading errors
+    if matches!(t1, Type::Unknown) || matches!(t2, Type::Unknown) {
+        return true;
+    }
+
     match (t1, t2) {
         (Type::Int, Type::Int) |
         (Type::Float, Type::Float) |
@@ -320,6 +445,13 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
         (Type::Qubit, Type::Qubit) |
         (Type::QubitMap, Type::QubitMap) |
         (Type::Gate, Type::Gate) => true,
+
+        // Numeric leniency
+        (Type::Int, Type::Float) => true, 
+        (Type::Float, Type::Int) => true,
+
+        (Type::ArchT, Type::ArchT) => true,
+        (Type::StateT, Type::StateT) => true,
 
         (Type::Vec(inner1), Type::Vec(inner2)) => types_compatible(inner1, inner2),
         (Type::Tuple(items1), Type::Tuple(items2)) => {
@@ -332,5 +464,74 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
         },
 
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_types_compatible_primitives() {
+        assert!(types_compatible(&Type::Int, &Type::Int));
+        assert!(types_compatible(&Type::Float, &Type::Float));
+        assert!(types_compatible(&Type::Bool, &Type::Bool));
+        
+        // Int/Float mixing (Leniency)
+        assert!(types_compatible(&Type::Int, &Type::Float));
+        assert!(types_compatible(&Type::Float, &Type::Int));
+
+        // Mismatches
+        assert!(!types_compatible(&Type::Int, &Type::Bool));
+    }
+
+    #[test]
+    fn test_types_compatible_joker_rule() {
+        assert!(types_compatible(&Type::Unknown, &Type::Int));
+        assert!(types_compatible(&Type::Int, &Type::Unknown));
+        assert!(types_compatible(&Type::Unknown, &Type::Unknown));
+        
+        let vec_int = Type::Vec(Box::new(Type::Int));
+        assert!(types_compatible(&Type::Unknown, &vec_int));
+    }
+
+    #[test]
+    fn test_types_compatible_compound() {
+        let vec_int = Type::Vec(Box::new(Type::Int));
+        let vec_float = Type::Vec(Box::new(Type::Float));
+        
+        assert!(types_compatible(&vec_int, &vec_int));
+        assert!(types_compatible(&vec_int, &vec_float));
+
+        let tuple1 = Type::Tuple(vec![Type::Int, Type::Float]);
+        let tuple2 = Type::Tuple(vec![Type::Int, Type::Float]);
+        let tuple3 = Type::Tuple(vec![Type::Int, Type::Bool]);
+    
+        assert!(types_compatible(&tuple1, &tuple2));
+        assert!(!types_compatible(&tuple1, &tuple3));
+    }
+
+    #[test]
+    fn test_types_compatible_functions() {
+        let fn1 = Type::Function {
+            params: vec![Type::Int],
+            return_type: Box::new(Type::Bool),
+        };
+        let fn2 = Type::Function {
+            params: vec![Type::Float],
+            return_type: Box::new(Type::Bool),
+        };
+        let fn3 = Type::Function {
+            params: vec![Type::Int, Type::Int],
+            return_type: Box::new(Type::Bool),
+        };
+        let fn4 = Type::Function {
+            params: vec![Type::Int],
+            return_type: Box::new(Type::Int),
+        };
+
+        assert!(types_compatible(&fn1, &fn2));
+        assert!(!types_compatible(&fn1, &fn3));
+        assert!(!types_compatible(&fn1, &fn4));
     }
 }
