@@ -9,14 +9,6 @@ fn test_advanced_features_and_vectors() {
         GateRealization{path : Vec()}
         
         realize_gate = 
-            // if (Gate.gate_type()) == CX 
-            // then 
-            //     (let v = Vec() in
-            //     let v2 = v.push(Location(0)) in
-            //     let v3 = v.extend(v2) in
-            //     v3.pop())
-            // else 
-            //     None
             if (Gate.gate_type()) == CX 
             then 
                 (let v = Vec() in
@@ -25,8 +17,8 @@ fn test_advanced_features_and_vectors() {
                 let popped = v3.pop() in
                 
                 all_paths(Arch, 
-                            vertical_neighbors(State.map[0], 10, 10), 
-                            horizontal_neighbors(State.map[1], 10), 
+                            vertical_neighbors(State.map[Gate.qubits[0]], 10, 10), 
+                            horizontal_neighbors(State.map[Gate.qubits[1]], 10), 
                             Vec()))
             else 
                 Vec()

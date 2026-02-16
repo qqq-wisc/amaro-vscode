@@ -58,6 +58,14 @@ impl SymbolTable {
             name: "Transition".to_string(), 
             fields: HashMap::new() 
         });
+        global_scope.insert("Qubit".to_string(), Type::Function {
+            params: vec![Type::Int],
+            return_type: Box::new(Type::Qubit),
+        });
+        global_scope.insert("GateRealization".to_string(), Type::Struct {
+            name: "GateRealization".to_string(),
+            fields: HashMap::new(),
+        });
 
         for gate in ["CX", "T", "Pauli", "PauliMeasurement", "H", "CZ", "X", "Y", "Z", "S", "Sdg", "Tdg", "RX", "RY", "RZ"] {
             global_scope.insert(gate.to_string(), Type::Gate);
@@ -65,8 +73,8 @@ impl SymbolTable {
 
         // Built-in functions
         global_scope.insert("value_swap".to_string(), Type::Function {
-            params: vec![Type::Unknown, Type::Unknown],
-            return_type: Box::new(Type::Tuple(vec![Type::Unknown, Type::Unknown])),
+            params: vec![Type::Location, Type::Location],
+            return_type: Box::new(Type::QubitMap),
         });
 
         global_scope.insert("map".to_string(), Type::Function {
@@ -86,11 +94,6 @@ impl SymbolTable {
                 Type::Vec(Box::new(Type::Unknown)),
             ],
             return_type: Box::new(Type::Unknown),
-        });
-
-        global_scope.insert("GateRealization".to_string(), Type::Struct {
-            name: "GateRealization".to_string(),
-            fields: HashMap::new(),
         });
 
         global_scope.insert("Vec".to_string(), Type::Function {
@@ -132,6 +135,25 @@ impl SymbolTable {
         global_scope.insert("path".to_string(), Type::Function {
             params: vec![],
             return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+        });
+
+        global_scope.insert("steiner_trees".to_string(), Type::Function {
+            params: vec![
+                Type::ArchT,
+                Type::Vec(Box::new(Type::Vec(Box::new(Type::Location)))),
+                Type::Vec(Box::new(Type::Location)),
+            ],
+            return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+        });
+
+        global_scope.insert("shortest_path".to_string(), Type::Function {
+            params: vec![
+                Type::ArchT,
+                Type::Vec(Box::new(Type::Location)),
+                Type::Vec(Box::new(Type::Location)),
+                Type::Vec(Box::new(Type::Location)),
+            ],
+            return_type: Box::new(Type::Option(Box::new(Type::Vec(Box::new(Type::Location))))),
         });
 
         SymbolTable {

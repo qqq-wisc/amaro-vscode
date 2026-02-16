@@ -10,6 +10,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = []
+    get_transitions = []
 "#;
 
 // Core Semantic Tests
@@ -71,6 +72,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = []
+    get_transitions = []
 RouteInfo:
     routed_gates = T
     realize_gate = None
@@ -145,6 +147,7 @@ TransitionInfo:
     Transition{edge : (Location, Location)}
     cost = 1.0
     apply = []
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -175,6 +178,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = []
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -200,6 +204,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = identity
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -228,6 +233,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = identity
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -248,6 +254,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = identity
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -277,6 +284,7 @@ fn test_semantic_checks_work_with_bracket_syntax() {
     TransitionInfo[
         cost = 1.0
         apply = []
+        get_transitions = []
     ]
     "#;
 
@@ -293,7 +301,8 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     cost = 1.0
-    apply = value_swap(Gate.qubits, []) 
+    apply = value_swap(Location(0), Location(1))
+    get_transitions = []
 "#;
 
     let file = parse_file(input).unwrap();
@@ -316,6 +325,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = []
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -337,6 +347,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = []
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -358,6 +369,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = value_swap(Transition.edge.0, Transition.edge.1)
+    get_transitions = []
 "#;
     let file = parse_file(input).unwrap();
     let diags = check_semantics(&file);
@@ -378,6 +390,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = value_swap(Transition.edge.(0), Transition.edge.(1))
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -399,6 +412,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = value_swap(Location(0), Location(1))
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -420,6 +434,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = []
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -441,6 +456,7 @@ RouteInfo:
 TransitionInfo:
     cost = 1.0
     apply = []
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -462,6 +478,7 @@ RouteInfo:
 TransitionInfo:
     cost = fold(0.0, |acc, x| -> acc, [1.0, 2.0, 3.0])
     apply = []
+    get_transitions = []
 "#;
     
     let file = parse_file(input).unwrap();
@@ -514,4 +531,110 @@ TransitionInfo:
         .collect();
     
     assert!(undefined_errors.is_empty(), "Let binding should work");
+}
+
+// State.map[Gate.qubits[0]] - QubitMap indexed by Qubit
+#[test]
+fn test_qubit_index_on_qubitmap() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    GateRealization{u : Location, v : Location}
+    realize_gate = State.map[Gate.qubits[0]]
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(errors.is_empty(), "QubitMap[Qubit] should be valid. Got: {:?}", errors);
+}
+
+#[test]
+fn test_state_map_called_as_function() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    GateRealization{u : Location}
+    realize_gate = values(State.map())
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(errors.is_empty(), "State.map() as function should be valid. Got: {:?}", errors);
+}
+
+#[test]
+fn test_state_map_indexed_directly() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    GateRealization{u : Location, v : Location}
+    realize_gate = if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
+                   then Some(GateRealization{u = State.map[Gate.qubits[0]], v = State.map[Gate.qubits[1]]})
+                   else None
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(errors.is_empty(), "State.map[Qubit] should be valid. Got: {:?}", errors);
+}
+
+#[test]
+fn test_unknown_index_access_is_lenient() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    GateRealization{path : Vec()}
+    realize_gate = map(|x| -> x.implementation.(path()), State.implemented_gates())
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(errors.is_empty(), "Unknown.index should be lenient. Got: {:?}", errors);
+}
+
+#[test]
+fn test_nisq_realize_gate() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    GateRealization{u : Location, v : Location}
+    realize_gate = if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
+                   then Some(GateRealization{u = State.map[Gate.qubits[0]], v = State.map[Gate.qubits[1]]})
+                   else None
+TransitionInfo:
+    Transition{edge : (Location, Location)}
+    get_transitions = (map(|x| -> Transition{edge = x}, Arch.edges())).push(Transition{edge = (Location(0), Location(0))})
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags.iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(errors.is_empty(), "NISQ pattern should be valid. Got: {:?}", errors);
 }

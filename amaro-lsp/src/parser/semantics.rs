@@ -21,7 +21,7 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
 
     let mut required_keys: HashMap<&str, Vec<&str>> = HashMap::new();
     required_keys.insert("RouteInfo", vec!["routed_gates", "realize_gate"]);
-    required_keys.insert("TransitionInfo", vec!["cost", "apply"]);
+    required_keys.insert("TransitionInfo", vec!["get_transitions", "apply", "cost"]);
     required_keys.insert("ArchInfo", vec![]);
     required_keys.insert("StateInfo", vec![]);
 
@@ -354,7 +354,11 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 },
                 Type::StateT => {
                     match field.as_str() {
-                        "map" => Type::QubitMap,
+                        // "map" => Type::QubitMap,
+                        "map" => Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::QubitMap),
+                        },
                         "gates" => Type::Function {
                             params: vec![],
                             return_type: Box::new(Type::Vec(Box::new(Type::Gate))),
@@ -365,7 +369,7 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 },
                 Type::Gate => {
                     match field.as_str() {
-                        "qubits" => Type::Vec(Box::new(Type::Int)),
+                        "qubits" => Type::Vec(Box::new(Type::Qubit)),
                         "gate_type" => Type::Function {
                             params: vec![],
                             return_type: Box::new(Type::Gate),
@@ -395,11 +399,27 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
             let obj_type = infer_expr_type(object, sym_table, diagnostics);
             let idx_type = infer_expr_type(index, sym_table, diagnostics);
 
-            if !types_compatible(&idx_type, &Type::Int) {
+            if obj_type == Type::Unknown {
+                return Type::Unknown;
+            }
+
+            let expected_idx_type = match &obj_type {
+                Type::Vec(_) => Type::Int,
+                Type::QubitMap => Type::Qubit,
+                Type::Function { params, return_type } if params.is_empty() => {
+                    match return_type.as_ref() {
+                        Type::QubitMap => Type::Qubit,
+                        _ => Type::Int,
+                    }
+                }
+                _ => Type::Int,
+            };
+
+            if idx_type != Type::Unknown && !types_compatible(&idx_type, &expected_idx_type) {
                 diagnostics.push(Diagnostic {
                     range: index.range,
                     severity: Some(DiagnosticSeverity::ERROR),
-                    message: "Index must be of type 'Int'.".to_string(),
+                    message: format!("Index type mismatch. Expected '{:?}' but got '{:?}'.", expected_idx_type, idx_type),
                     ..Default::default()
                 });
             }
