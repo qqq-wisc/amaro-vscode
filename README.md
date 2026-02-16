@@ -4,27 +4,33 @@
 
 ## Features
 
-### Advanced Semantic Analysis (New in 0.2.0)
-The 0.2.0 release introduces a powerful semantic analyzer capable of validating complex quantum routing logic:
-* **Type Unification:** Seamlessly handles both property access (`State.map`) and method calls (`State.map()`) interchangeably.
+### Advanced Semantic Analysis
+The LSP performs deep type inference and validation of your quantum routing logic:
+
+* **QubitMap Indexing:** Correctly validates `State.map[Gate.qubits[0]]` - understands that `QubitMap` is indexed by `Qubit`, not `Int`.
+* **Unified Access:** Intelligently handles both property access (`State.map`) and functional access (`State.map()`), allowing for cleaner, more flexible code styles.
+* **Type Inference:** Infers types through nested expressions including `map`, `fold`, `let...in`, and `if-then-else`.
+* **Smart Leniency:** Expressions of `Unknown` type (e.g. `x.implementation.(path())`) are accepted without false errors.
 * **Control Flow Validation:** Ensures type consistency across `if-then-else` branches and supports nested `let...in` bindings.
 * **Vector Operations:** Built-in support for standard vector methods (`push`, `pop`, `extend`) and tuple indexing (`edge.0`).
 * **Deep Type Checking:** Recursively validates generic types (e.g., `Vec<Vec<Location>>`) and custom Struct compatibility.
 
+
 ### Syntax Highlighting
-Full-color syntax highlighting for the Amaro language structure, including:
-* **Blocks:** `GateRealization`, `Transition`, `Architecture`, `Step`.
-* **Info Definitions:** `RouteInfo:`, `TransitionInfo:`, `ArchInfo:`.
+Full-color syntax highlighting for `.qmrl` files including:
+* **Blocks:** `RouteInfo`, `TransitionInfo`, `ArchInfo`, `StateInfo`.
 * **Embedded Rust:** Correctly highlights Rust code inside `{{ ... }}` blocks.
-* **Quantum Types:** Special highlighting for `CX`, `T`, `Pauli`, and `Location`.
+* **Quantum Types:** Special highlighting for `CX`, `T`, `Pauli`, `Location` and `Qubit`.
 * **Smart Parsing:** Correctly parses integers as field names for tuple access (e.g., `transition.edge.0`).
+* **Expressions:** Struct definitions, field access, and lambda expressions
+
 
 ### Language Server Protocol (LSP)
-Includes a custom Rust-based Language Server (`amaro-lsp`) that provides:
+A custom Rust-based Language Server (`amaro-lsp`) providing:
 
 1.  **Semantic Analysis & Diagnostics:**
-    * **Validation:** Checks for mandatory blocks (e.g., `RouteInfo`) and required fields (e.g., `routed_gates`).
-    * **Style/Lint Checks:** Warns if block names are not capitalized (e.g., `transition` → `Transition`).
+    * **Validation:** Validates mandatory blocks (`RouteInfo`, `TransitionInfo`) and required fields (`routed_gates`, `realize_gate`, `get_transitions`, `apply`, `cost`).
+    * **Style/Lint Checks:** Warns on incorrectly capitalized block names.
     * **Structure:** Validates correct key-value pairs, fields and struct definitions.
 2.  **Document Outline (Symbols):**
     * Navigate complex blocks, steps, fields and files easily using the VS Code "Outline" view or "Go to Symbol" (`Ctrl+Shift+O`).
@@ -34,17 +40,11 @@ Includes a custom Rust-based Language Server (`amaro-lsp`) that provides:
     * Full support for embedded Rust blocks `{{ ... }}`.
 
 ## Requirements
+Because this extension is currently in alpha, you must compile the language server manually:
+1. **Node.js & npm** - [nodejs.org](https://nodejs.org/en)
+2. **Rust Toolchain** - [rustup.rs](https://rustup.rs/)
 
-This extension relies on a Rust-based Language Server (`amaro-lsp`) that must be built locally.
-
-1.  **Node.js & npm:** The VS Code extention portion requires Node.js.
-    * Install from [nodejs.org](https://nodejs.org/en).
-2.  **Rust Toolchain:** You need `cargo` installed to build the language server.
-    * Install from [rustup.rs](https://rustup.rs/).
-3.  **Build Step:**
-    * The extension looks for the binary at `amaro-lsp/target/debug/amaro-lsp` after the build step is complete.
-
-## Building & Running the Extension
+## Building & Running
 Clone the repository and build as follows:
 ```bash
 # Install Node modules
@@ -59,15 +59,9 @@ cd ..
 npm run watch
 ```
 
-### Running the Extension
-After running `npm run watch`:
-1. **Press `F5` in VS Code.**
-2. A new VS Code window will open with the **Amaro extension loaded**.
-3. Open any `.qmrl` file to see highlighting, symbols, and diagnostics.
+Press `F5` in VS Code to open a development window with the extension loaded. Open any `.qmrl` file to activate highlighting, symbols, and diagnostics.
 
-## Development & Testing
-
-If you are modifying the parser or language server logic, use the following commands to verify your changes.
+## Testing
 
 **Running Unit Tests**
 The project includes a comprehensive suite of unit tests for the parser, covering syntax, precedence, and complex expressions.
@@ -84,28 +78,38 @@ cargo clean && cargo build
 ```
 
 ## Example Code
-
 This extension provides highlighting, navigation, and error checking for Amaro files like this:
 
 ```amaro
 RouteInfo:
-    routed_gates = CX
-    
-    // Complex logic with nested bindings and vector operations
-    realize_gate = 
-        if (Gate.gate_type()) == CX 
-        then 
-            (let v = Vec() in
-             let v2 = v.push(Location(0)) in
-             let v3 = v.extend(v2) in
-             // Returns a valid Vector of Locations
-             all_paths(Arch, State.map[0], State.map[1], v3))
-        else 
-            Vec()
+    routed_gates = CX, T
+    GateRealization{path : Vec<Location>}
+    realize_gate =
+        if (Gate.gate_type()) == CX
+        then
+            map(|x| -> GateRealization{path = x},
+                all_paths(Arch,
+                    vertical_neighbors(State.map[Gate.qubits[0]], Arch.width, Arch.height),
+                    horizontal_neighbors(State.map[Gate.qubits[1]], Arch.width),
+                    (values(State.map())).extend(Arch.magic_state_qubits())))
+        else
+            map(|x| -> GateRealization{path = x},
+                all_paths(Arch,
+                    vertical_neighbors(State.map[Gate.qubits[0]], Arch.width, Arch.height),
+                    fold(Vec(), |x, acc| -> acc.extend(x),
+                         map(|x| -> horizontal_neighbors(x, Arch.width), Arch.magic_state_qubits())),
+                    (values(State.map())).extend(Arch.magic_state_qubits())))
 
 TransitionInfo:
-    // Tuple indexing supported (.0, .1)
-    apply = value_swap(Transition.edge.0, Transition.edge.1)
+    Transition{edge : (Location, Location)}
+    get_transitions = map(|x| -> Transition{edge = x}, Arch.edges())
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
+    cost = 1.0
+
+ArchInfo:
+    Arch{width : Int, height : Int}
+
+StateInfo:
     cost = 1.0
 
 {{
@@ -117,27 +121,8 @@ TransitionInfo:
 ```
 
 ## Known Issues
-* **Binary Path:** The extension expects the `amaro-lsp` binary to be built in `target/debug`. You must run `cargo build` before starting the extension.
-* **Type Checking:** Advanced type checking (e.g., validating that `routed_gates` is assigned a valid Gate type) is currently in early development.
+* **LSP Binary Location:** The extension currently looks for the language server in `amaro-lsp/target/debug/amaro-lsp`. You **must** run `cargo build` inside the `amaro-lsp` folder before launching the extension.
+* **Type Checking:** The `gate_type()` return type is treated as `Gate` for comparison purposes; enum variants are not distinguished.
 
-## Release Notes
-**0.2.0**
-* **NISQ Support:** Full support for advanced routing logic, including vector manipulation (`push`, `pop`, `extend`) and helper functions (`all_paths`).
-* **Core Parser:**
-    * **Tuple Indexing:** Enabled support for direct integer access on tuples (e.g., `transition.edge.0`).
-    * **Complex Control Flow:** Fixed parsing of nested `let` bindings inside `if-then-else` blocks.
-* **Semantic Analysis:**
-    * **Unified Access:** Properties and zero-argument functions (e.g., `State.map` vs `State.map()`) are now interchangeable.
-    * **Type Safety:** Enforced strict type compatibility between `then` and `else` branches to prevent runtime errors.
-    * **Type Equivalence:** Added explicit compatibility checks for `Arch`, `State`, and `Gate` types.
-* **Fixes:** Resolved a critical parser bug where lines following complex struct definitions were being ignored.
 
-**0.1.0**
-* Initial release.
-* Added Grammar for `.qmrl `files.
-* Added Language Client connection to `amaro-lsp`.
-* **Core Parser:** Implemented robust AST parsing with error recovery.
-* **Semantic Analysis:** Added diagnostics for missing mandatory blocks and required keys.
-* **Symbol Navigation:** Added support for "Go to Symbol" and Outline view.
-* **Embedded Rust:** Improved parsing for Rust code blocks {{ ... }}.
-* **Fixes:** Resolved concurrency issues with node IDs in the language server.
+See [CHANGELOG.md](CHANGELOG.md) for full history.

@@ -335,7 +335,7 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 // Built-in Types
                 Type::ArchT => {
                     match field.as_str() {
-                        "width" | "height" => Type::Int,
+                        "width" | "height" | "stack_size" => Type::Int,
                         "edges" => Type::Function {
                             params: vec![],
                             return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location])))),
@@ -375,6 +375,10 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                             return_type: Box::new(Type::Gate),
                         },
                         "implementation" => Type::Unknown,
+                        "x_indices" | "y_indices" | "z_indices" => Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
+                        },
                         _ => Type::Unknown,
                     }
                 },

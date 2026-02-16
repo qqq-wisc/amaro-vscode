@@ -1,8 +1,8 @@
 {
   "name": "amaro-vscode",
-  "displayName": "Amaro",
-  "description": "Language support for Amaro quantum gate language (.qmrl)",
-  "version": "0.2.0",
+  "displayName": "Amaro Language Support",
+  "description": "Syntax highlighting and LSP support for .qmrl files",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.106.1"
   },

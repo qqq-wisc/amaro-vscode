@@ -304,10 +304,9 @@ impl Backend {
         match parse_file(&text) {
             Ok(file) => {
                 // Semantic Checks
-                let ast_summary = format_simple_ast(&file);
-                self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_summary)).await;
-                // let ast_debug = format!("{:#?}", file);
-                // self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_debug)).await;
+                // PRINTING THE AST. CAN BE REMOVED LATER
+                // let ast_summary = format_simple_ast(&file);
+                // self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_summary)).await;
                 
                 let mut semantic_errors = check_semantics(&file);
                 diagnostics.append(&mut semantic_errors);
@@ -356,9 +355,9 @@ impl LanguageServer for Backend {
 
         self.documents.write().await.insert(uri.clone(), text.clone());
 
-        self.client
-            .log_message(MessageType::INFO, "Amaro file opened!")
-            .await;
+        // self.client
+        //     .log_message(MessageType::INFO, "Amaro file opened!")
+        //     .await;
         self.validate_document(uri, text).await;
     }
 
