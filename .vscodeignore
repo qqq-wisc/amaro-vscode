@@ -12,3 +12,13 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+
+# Exclude Rust source and build artifacts
+amaro-lsp/src/**
+amaro-lsp/tests/**
+amaro-lsp/Cargo.toml
+amaro-lsp/Cargo.lock
+amaro-lsp/target/**
+
+# CRITICAL: Force-include the release binary
+!amaro-lsp/target/release/amaro-lsp

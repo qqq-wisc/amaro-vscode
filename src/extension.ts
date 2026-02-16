@@ -15,7 +15,7 @@ export function activate(context: ExtensionContext) {
 
 	const binaryName = process.platform === 'win32' ? 'amaro-lsp.exe' : 'amaro-lsp';
 	const serverPath = context.asAbsolutePath(
-		path.join('amaro-lsp', 'target', 'debug', binaryName)
+		path.join('amaro-lsp', 'target', 'release', binaryName)
 	);
 	console.log(`Looking for LSP binary at: ${serverPath}`);
 
