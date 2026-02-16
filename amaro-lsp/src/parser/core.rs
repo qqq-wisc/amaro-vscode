@@ -1,18 +1,18 @@
 use nom::{
+    IResult,
     branch::alt,
     bytes::complete::{tag, take_while},
     character::complete::{char, multispace1, not_line_ending, satisfy},
     combinator::{map, peek, recognize, verify},
     multi::{many0, separated_list0, separated_list1},
     sequence::{delimited, pair},
-    IResult,
 };
 
 use nom::error::Error;
 
-use crate::ast::*;
-use super::utils::calc_range;
 use super::expr::parse_expr;
+use super::utils::calc_range;
+use crate::ast::*;
 
 // Whitespaces and Comments
 pub fn whitespace_handler(input: &str) -> IResult<&str, &str> {
@@ -27,19 +27,19 @@ pub fn whitespace_handler(input: &str) -> IResult<&str, &str> {
 pub fn parse_rust_embedded_robust(input: &str) -> IResult<&str, &str> {
     let (input, _) = tag("{{")(input)?;
     let start = input;
-    
+
     let mut depth = 1;
     let mut in_string = false;
     let mut in_char = false;
     let mut escape = false;
     let mut bytes_consumed = 0;
-    
+
     for (i, ch) in input.char_indices() {
         if escape {
             escape = false;
             continue;
         }
-        
+
         match ch {
             '\\' if in_string || in_char => escape = true,
             '"' if !in_char => in_string = !in_string,
@@ -55,14 +55,17 @@ pub fn parse_rust_embedded_robust(input: &str) -> IResult<&str, &str> {
             _ => {}
         }
     }
-    
+
     if depth != 0 {
-        return Err(nom::Err::Error(Error::new(input, nom::error::ErrorKind::Tag)));
+        return Err(nom::Err::Error(Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
     }
-    
+
     let content = &input[..bytes_consumed];
     let (input, _) = tag("}}")(&input[bytes_consumed..])?;
-    
+
     Ok((input, &start[..content.len()]))
 }
 
@@ -77,13 +80,24 @@ where
 pub fn parse_identifier(input: &str) -> IResult<&str, &str> {
     recognize(pair(
         satisfy(|c| c.is_ascii_alphabetic() || c == '_'),
-        take_while(|c: char| c.is_ascii_alphanumeric() || c == '_')
+        take_while(|c: char| c.is_ascii_alphanumeric() || c == '_'),
     ))(input)
 }
 
 pub fn is_keyword(s: &str) -> bool {
-    matches!(s, "if" | "then" | "else" | "let" | "in" | "true" | "false" 
-        | "Some" | "None" | "where" | "return")
+    matches!(
+        s,
+        "if" | "then"
+            | "else"
+            | "let"
+            | "in"
+            | "true"
+            | "false"
+            | "Some"
+            | "None"
+            | "where"
+            | "return"
+    )
 }
 
 pub fn parse_non_keyword_identifier(input: &str) -> IResult<&str, &str> {
@@ -92,14 +106,13 @@ pub fn parse_non_keyword_identifier(input: &str) -> IResult<&str, &str> {
 
 // Type Annotations
 fn parse_type_annotation(input: &str) -> IResult<&str, TypeAnnotation> {
-    alt((
-        parse_function_type,
-        parse_atomic_type,
-    ))(input)
+    alt((parse_function_type, parse_atomic_type))(input)
 }
 
 fn parse_simple_type(input: &str) -> IResult<&str, TypeAnnotation> {
-    map(parse_identifier, |s: &str| TypeAnnotation::Simple(s.to_string()))(input)
+    map(parse_identifier, |s: &str| {
+        TypeAnnotation::Simple(s.to_string())
+    })(input)
 }
 
 fn parse_generic_type(input: &str) -> IResult<&str, TypeAnnotation> {
@@ -107,7 +120,7 @@ fn parse_generic_type(input: &str) -> IResult<&str, TypeAnnotation> {
     let (input, _) = ws(char('<'))(input)?;
     let (input, type_args) = separated_list1(ws(char(',')), parse_type_annotation)(input)?;
     let (input, _) = ws(char('>'))(input)?;
-    
+
     Ok((input, TypeAnnotation::Generic(name.to_string(), type_args)))
 }
 
@@ -115,75 +128,77 @@ fn parse_tuple_type(input: &str) -> IResult<&str, TypeAnnotation> {
     let (input, _) = char('(')(input)?;
     let (input, types) = separated_list1(ws(char(',')), parse_type_annotation)(input)?;
     let (input, _) = ws(char(')'))(input)?;
-    
+
     Ok((input, TypeAnnotation::Tuple(types)))
 }
 
 fn parse_typed_param<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, TypedParam> {
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
+
     let (input, name) = parse_identifier(input)?;
     let (input, _) = ws(char(':'))(input)?;
     let (input, type_ann) = parse_type_annotation(input)?;
-    
+
     let end = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
-    Ok((input, TypedParam::new(
-        name.to_string(),
-        type_ann,
-        calc_range(original_input, start, end - start),
-    )))
+
+    Ok((
+        input,
+        TypedParam::new(
+            name.to_string(),
+            type_ann,
+            calc_range(original_input, start, end - start),
+        ),
+    ))
 }
 
 // Struct Definition
 fn parse_struct_def<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, StructDef> {
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
+
     let (input, name) = parse_identifier(input)?;
     let name_start = start;
     let name_end = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
+
     let (_, _) = peek(ws(char('{')))(input)?;
-    
+
     let (input, _) = ws(char('{'))(input)?;
-    let (input, params) = separated_list0(
-        ws(char(',')),
-        |i| parse_typed_param(original_input, i)
-    )(input)?;
+    let (input, params) =
+        separated_list0(ws(char(',')), |i| parse_typed_param(original_input, i))(input)?;
     let (input, _) = ws(char('}'))(input)?;
-    
+
     let end = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
-    Ok((input, StructDef::new(
-        name.to_string(),
-        calc_range(original_input, name_start, name_end - name_start),
-        params,
-        calc_range(original_input, start, end - start),
-    )))
+
+    Ok((
+        input,
+        StructDef::new(
+            name.to_string(),
+            calc_range(original_input, name_start, name_end - name_start),
+            params,
+            calc_range(original_input, start, end - start),
+        ),
+    ))
 }
 
 // Field & Block Parsing
 fn parse_field<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, Field> {
     let (input, _) = whitespace_handler(input)?;
-    
+
     let key_start = input.as_ptr() as usize - original_input.as_ptr() as usize;
     let (input, key) = parse_non_keyword_identifier(input)?;
     let key_len = key.len();
-    
+
     let (input, _) = ws(char('='))(input)?;
-    
+
     let val_start = input.as_ptr() as usize - original_input.as_ptr() as usize;
     let (input, first_expr) = parse_expr(original_input, input)?;
 
     // Check for comma-separated list (e.g., routed_gates = CX, T)
-    let (input, rest_exprs) = many0(
-        |i: &'a str| {
-            let (i, _) = whitespace_handler(i)?;
-            let (i, _) = char(',')(i)?;
-            let (i, _) = whitespace_handler(i)?;
-            parse_expr(original_input, i)
-        })
-    (input)?;
+    let (input, rest_exprs) = many0(|i: &'a str| {
+        let (i, _) = whitespace_handler(i)?;
+        let (i, _) = char(',')(i)?;
+        let (i, _) = whitespace_handler(i)?;
+        parse_expr(original_input, i)
+    })(input)?;
 
     // If there were commas, wrap everything into a List. Else just return the single expression.
     let value_expr = if rest_exprs.is_empty() {
@@ -199,16 +214,22 @@ fn parse_field<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, 
     };
 
     let val_end = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    
-    Ok((input, Field::new(
-        key.to_string(),
-        calc_range(original_input, key_start, key_len),
-        value_expr,
-        calc_range(original_input, val_start, val_end - val_start),
-    )))
+
+    Ok((
+        input,
+        Field::new(
+            key.to_string(),
+            calc_range(original_input, key_start, key_len),
+            value_expr,
+            calc_range(original_input, val_start, val_end - val_start),
+        ),
+    ))
 }
 
-fn parse_block_item<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, Option<BlockItem>> {
+fn parse_block_item<'a>(
+    original_input: &'a str,
+    input: &'a str,
+) -> IResult<&'a str, Option<BlockItem>> {
     let (input, _) = whitespace_handler(input)?;
 
     if let Ok((input, struct_def)) = parse_struct_def(original_input, input) {
@@ -231,14 +252,14 @@ fn extract_block_items(original_input: &str, body_text: &str) -> Vec<BlockItem> 
             Ok((rest, Some(item))) => {
                 items.push(item);
                 current_input = rest;
-            },
+            }
             Ok((_rest, None)) => {
                 if let Some(pos) = current_input.find('\n') {
                     current_input = &current_input[pos + 1..];
                 } else {
                     break;
                 }
-            },
+            }
             Err(_) => {
                 if let Some(pos) = current_input.find('\n') {
                     current_input = &current_input[pos + 1..];
@@ -258,7 +279,7 @@ fn is_new_block_start(line: &str) -> bool {
         Ok((rest, _)) => {
             let next_char = rest.trim_start().chars().next();
             matches!(next_char, Some('[') | Some(':'))
-        },
+        }
         Err(_) => false,
     }
 }
@@ -275,14 +296,16 @@ pub fn consume_remaining_block(input: &str) -> IResult<&str, &str> {
             Ok((rest, line)) => {
                 len += line.len();
                 current = rest;
-                
-                if let Ok((rest_nl, nl)) = alt::<_, _, Error<&str>, _>((tag("\n"), tag("\r\n")))(current) {
+
+                if let Ok((rest_nl, nl)) =
+                    alt::<_, _, Error<&str>, _>((tag("\n"), tag("\r\n")))(current)
+                {
                     len += nl.len();
                     current = rest_nl;
                 } else {
                     break;
                 }
-            },
+            }
             Err(_) => break,
         }
     }
@@ -308,22 +331,25 @@ pub fn parse_block<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a s
         let (input, _) = char(':')(input)?;
         let (input, body_content) = consume_remaining_block(input)?;
         let items = extract_block_items(original_input, body_content);
-        
-        return Ok((input, Some(Block::new(
-            kind.to_string(),
-            calc_range(original_input, start_offset, kind.len()),
-            BlockContent::Fields(items),
-        ))));
+
+        return Ok((
+            input,
+            Some(Block::new(
+                kind.to_string(),
+                calc_range(original_input, start_offset, kind.len()),
+                BlockContent::Fields(items),
+            )),
+        ));
     }
 
     if check_bracket.is_ok() {
         let (input, _) = char('[')(input)?;
         let body_start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-        
-        let bytes = original_input[body_start..].as_bytes();
+
+        let bytes = &original_input.as_bytes()[body_start..];
         let mut depth = 1;
         let mut body_end = body_start;
-        
+
         for (i, &b) in bytes.iter().enumerate() {
             match b {
                 b'[' => depth += 1,
@@ -337,29 +363,28 @@ pub fn parse_block<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a s
                 _ => {}
             }
         }
-        
+
         let inner_body = &original_input[body_start..body_end];
         let items = extract_block_items(original_input, inner_body);
-        
+
         let remaining_input = &original_input[body_end..];
         let (input, _) = char(']')(remaining_input)?;
-        
-        return Ok((input, Some(Block::new(
-            kind.to_string(),
-            calc_range(original_input, start_offset, kind.len()),
-            BlockContent::Fields(items),
-        ))));
+
+        return Ok((
+            input,
+            Some(Block::new(
+                kind.to_string(),
+                calc_range(original_input, start_offset, kind.len()),
+                BlockContent::Fields(items),
+            )),
+        ));
     }
 
     Ok((input, None))
 }
 
 fn parse_atomic_type(input: &str) -> IResult<&str, TypeAnnotation> {
-    alt((
-        parse_generic_type,
-        parse_tuple_type,
-        parse_simple_type,
-    ))(input)
+    alt((parse_generic_type, parse_tuple_type, parse_simple_type))(input)
 }
 
 // Parse function
@@ -368,10 +393,13 @@ fn parse_function_type(input: &str) -> IResult<&str, TypeAnnotation> {
     let (input, _) = ws(alt((tag("->"), tag("→"))))(input)?;
 
     let (input, return_type) = parse_type_annotation(input)?;
-    Ok((input, TypeAnnotation::Function {
-        params,
-        return_type: Box::new(return_type),
-    }))
+    Ok((
+        input,
+        TypeAnnotation::Function {
+            params,
+            return_type: Box::new(return_type),
+        },
+    ))
 }
 
 pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {
@@ -383,11 +411,10 @@ pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {
 
     while !current_input.is_empty() {
         // Skip whitespace
-        match whitespace_handler(current_input) {
-            Ok((rest, _)) => current_input = rest,
-            Err(_) => {}
+        if let Ok((rest, _)) = whitespace_handler(current_input) {
+            current_input = rest;
         }
-        
+
         if current_input.is_empty() {
             break;
         }
@@ -396,11 +423,11 @@ pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {
             Ok((rest, Some(block))) => {
                 blocks.push(block);
                 current_input = rest;
-            },
+            }
             Ok((rest, None)) => {
                 // Parsed successfully but got nothing. Advance
                 current_input = rest;
-            },
+            }
             Err(_) => {
                 // Error recovery
                 if let Some(pos) = current_input.find('\n') {

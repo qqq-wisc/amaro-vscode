@@ -120,6 +120,17 @@ StateInfo:
 }}
 ```
 
+## Examples
+
+The `examples/` folder contains working `.qmrl` files demonstrating different quantum routing strategies:
+
+- **nisq.qmrl** - Simple NISQ routing for near-term devices
+- **scmr.qmrl** - Surface Code Mapping & Routing with magic states
+- **ilq.qmrl** - Interleaved Lattice Qubits with layer-aware routing
+- **mqlss.qmrl** - Magic State Lattice Surgery using Steiner trees
+
+See `examples/Readme.md` for detailed explanations.
+
 ## Known Issues
 * **LSP Binary Location:** The extension currently looks for the language server in `amaro-lsp/target/debug/amaro-lsp`. You **must** run `cargo build` inside the `amaro-lsp` folder before launching the extension.
 * **Type Checking:** The `gate_type()` return type is treated as `Gate` for comparison purposes; enum variants are not distinguished.

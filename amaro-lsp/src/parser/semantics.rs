@@ -1,22 +1,27 @@
-use tower_lsp::lsp_types::{
-    Diagnostic,
-    DiagnosticSeverity,
-    DiagnosticRelatedInformation,
-    Location,
-    Range,
-    Url
-};
-use std::collections::HashMap;
-use crate::ast::*;
 use super::symbols::*;
+use crate::ast::*;
+use std::collections::HashMap;
+use tower_lsp::lsp_types::{
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range, Url,
+};
 
-// Semantic Analysis
+/// Performs semantic analysis on a parsed Amaro file.
+///
+/// Validates block structure, required fields, and type correctness.
+/// Returns diagnostics for LSP clients.
 pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     let known_blocks = [
-        "GateRealization", "Transition", "Architecture", "Arch", "Step",
-        "RouteInfo", "TransitionInfo", "ArchInfo", "StateInfo"
+        "GateRealization",
+        "Transition",
+        "Architecture",
+        "Arch",
+        "Step",
+        "RouteInfo",
+        "TransitionInfo",
+        "ArchInfo",
+        "StateInfo",
     ];
 
     let mut required_keys: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -33,15 +38,20 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
         let lower_name = block_name.to_lowercase();
 
         // 1. Capitalization Check
-        if let Some(correct_name) = known_blocks.iter().find(|&&kb| kb.eq_ignore_ascii_case(block_name)) {
-            if block_name != *correct_name {
-                diagnostics.push(Diagnostic {
-                    range: block.range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    message: format!("Block '{}' should be Capitalized (e.g., '{}').", block_name, correct_name),
-                    ..Default::default()
-                });
-            }
+        if let Some(correct_name) = known_blocks
+            .iter()
+            .find(|&&kb| kb.eq_ignore_ascii_case(block_name))
+            && block_name != *correct_name
+        {
+            diagnostics.push(Diagnostic {
+                range: block.range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                message: format!(
+                    "Block '{}' should be Capitalized (e.g., '{}').",
+                    block_name, correct_name
+                ),
+                ..Default::default()
+            });
         }
 
         // 2. Uniqueness Check
@@ -50,15 +60,14 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
                 range: block.range,
                 severity: Some(DiagnosticSeverity::ERROR),
                 message: format!("Duplicate definition of '{}' block.", block_name),
-                related_information: Some(vec![
-                    DiagnosticRelatedInformation {
-                        location: Location {
-                            uri: Url::parse("file:///previous/definition").unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
-                            range: *first_range
-                        },
-                        message: "First defined here".to_string()
-                    }
-                ]),
+                related_information: Some(vec![DiagnosticRelatedInformation {
+                    location: Location {
+                        uri: Url::parse("file:///previous/definition")
+                            .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
+                        range: *first_range,
+                    },
+                    message: "First defined here".to_string(),
+                }]),
                 ..Default::default()
             });
         } else {
@@ -70,7 +79,7 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
         let mut present_keys: Vec<&str> = Vec::new();
         let BlockContent::Fields(items) = &block.content;
         for item in items {
-            if let BlockItem::Field(field) = item {                
+            if let BlockItem::Field(field) = item {
                 present_keys.push(field.key.as_str());
                 infer_expr_type(&field.value, &mut sym_table, &mut diagnostics);
 
@@ -88,7 +97,10 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
                     diagnostics.push(Diagnostic {
                         range: block.range,
                         severity: Some(DiagnosticSeverity::ERROR),
-                        message: format!("Block '{}' is missing required field: '{}'", block_name, req),
+                        message: format!(
+                            "Block '{}' is missing required field: '{}'",
+                            block_name, req
+                        ),
                         ..Default::default()
                     });
                 }
@@ -112,6 +124,7 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
     diagnostics
 }
 
+/// Validates that gate identifiers are recognized gate types (CX, T, Pauli, PauliMeasurement).
 fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
     let valid_gates = ["CX", "T", "Pauli", "PauliMeasurement"];
 
@@ -121,22 +134,32 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
                 diagnostics.push(Diagnostic {
                     range: expr.range,
                     severity: Some(DiagnosticSeverity::WARNING),
-                    message: format!("'{}' is not a recognized standard gate. Expected one of: {:?}", name, valid_gates),
+                    message: format!(
+                        "'{}' is not a recognized standard gate. Expected one of: {:?}",
+                        name, valid_gates
+                    ),
                     ..Default::default()
                 });
             }
-        },
+        }
         ExprKind::List(items) | ExprKind::Tuple(items) => {
             for item in items {
                 validate_gates(item, diagnostics);
             }
-        },
+        }
         _ => {}
     }
 }
 
-// Type Inference Engine
-pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &mut Vec<Diagnostic>) -> Type {
+/// Infers the type of an expression using the current symbol table.
+/// (Type Inference Engine)
+/// Recursively walks the AST and emits type errors for incompatibilities.
+/// Uses `Unknown` for leniency to avoid false positives.
+pub fn infer_expr_type(
+    expr: &Expr,
+    sym_table: &mut SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Type {
     match &expr.kind {
         ExprKind::IntLiteral(_) => Type::Int,
         ExprKind::FloatLiteral(_) => Type::Float,
@@ -158,7 +181,7 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 });
                 Type::Unknown
             })
-        },
+        }
 
         ExprKind::List(items) => {
             if items.is_empty() {
@@ -179,18 +202,19 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 }
                 Type::Vec(Box::new(first_type))
             }
-        },
+        }
 
-        ExprKind::Tuple(items) => {
-            Type::Tuple(items.iter()
+        ExprKind::Tuple(items) => Type::Tuple(
+            items
+                .iter()
                 .map(|e| infer_expr_type(e, sym_table, diagnostics))
-                .collect())
-        },
+                .collect(),
+        ),
 
         ExprKind::Some(inner) => {
             let inner_type = infer_expr_type(inner, sym_table, diagnostics);
             Type::Option(Box::new(inner_type))
-        },
+        }
 
         ExprKind::Lambda { params, body } => {
             sym_table.enter_scope();
@@ -206,7 +230,7 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 params: param_types,
                 return_type: Box::new(return_type),
             }
-        },
+        }
 
         ExprKind::LetBinding { name, value, body } => {
             sym_table.enter_scope();
@@ -215,9 +239,13 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
             let body_type = infer_expr_type(body, sym_table, diagnostics);
             sym_table.exit_scope();
             body_type
-        },
+        }
 
-        ExprKind::IfThenElse { condition, then_branch, else_branch } => {
+        ExprKind::IfThenElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let cond_type = infer_expr_type(condition, sym_table, diagnostics);
             if !types_compatible(&cond_type, &Type::Bool) {
                 diagnostics.push(Diagnostic {
@@ -235,44 +263,60 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 diagnostics.push(Diagnostic {
                     range: expr.range,
                     severity: Some(DiagnosticSeverity::ERROR),
-                    message: "Then and else branches of if-then-else must have compatible types.".to_string(),
+                    message: "Then and else branches of if-then-else must have compatible types."
+                        .to_string(),
                     ..Default::default()
                 });
             }
-            then_type  
-        },
+            then_type
+        }
 
         ExprKind::FunctionCall { function, args } => {
             let func_type = infer_expr_type(function, sym_table, diagnostics);
             match func_type {
-                Type::Function { params, return_type } => {
+                Type::Function {
+                    params,
+                    return_type,
+                } => {
                     if params.len() != args.len() {
                         diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            message: format!("Expected {} arguments but got {}.", params.len(), args.len()),
+                            message: format!(
+                                "Expected {} arguments but got {}.",
+                                params.len(),
+                                args.len()
+                            ),
                             ..Default::default()
                         });
                         return *return_type;
                     }
                     for (i, (param_type, arg)) in params.iter().zip(args).enumerate() {
                         let arg_type = infer_expr_type(arg, sym_table, diagnostics);
-                        
+
                         // Following Logic
                         // 1. If param_type Unknown, Accept
                         // 2. If arg_type Unknown, Accept (Avoid Cascading Errors)
                         // 3. Otherwise, Check Compatibility
-                        if *param_type != Type::Unknown && arg_type != Type::Unknown && !types_compatible(param_type, &arg_type) {
+                        if *param_type != Type::Unknown
+                            && arg_type != Type::Unknown
+                            && !types_compatible(param_type, &arg_type)
+                        {
                             diagnostics.push(Diagnostic {
                                 range: arg.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
-                                message: format!("Argument {} expected type '{:?}' but got '{:?}'.", i + 1, param_type, arg_type),
+                                message: format!(
+                                    "Argument {} expected type '{:?}' but got '{:?}'.",
+                                    i + 1,
+                                    param_type,
+                                    arg_type
+                                ),
                                 ..Default::default()
                             });
                         }
                     }
                     *return_type
-                },
+                }
                 Type::Unknown => Type::Unknown, // Avoid Cascading Errors
                 _ => {
                     diagnostics.push(Diagnostic {
@@ -284,8 +328,8 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                     Type::Unknown
                 }
             }
-        },
-        
+        }
+
         ExprKind::FieldAccess { object, field } => {
             let obj_type = infer_expr_type(object, sym_table, diagnostics);
             match obj_type {
@@ -298,7 +342,7 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                     } else if field == "pop" {
                         Type::Function {
                             params: vec![],
-                            return_type: Box::new(Type::Option(inner.clone()))
+                            return_type: Box::new(Type::Option(inner.clone())),
                         }
                     } else if field == "extend" {
                         Type::Function {
@@ -320,37 +364,36 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                     } else {
                         Type::Unknown
                     }
-                },
-                Type::Struct { fields, .. } => {
-                    fields.get(field).cloned().unwrap_or(Type::Unknown)
-                },
+                }
+                Type::Struct { fields, .. } => fields.get(field).cloned().unwrap_or(Type::Unknown),
                 Type::Tuple(elements) => {
                     if let Ok(idx) = field.parse::<usize>() {
                         elements.get(idx).cloned().unwrap_or(Type::Unknown)
                     } else {
                         Type::Unknown
                     }
-                },
+                }
 
                 // Built-in Types
-                Type::ArchT => {
-                    match field.as_str() {
-                        "width" | "height" | "stack_size" => Type::Int,
-                        "edges" => Type::Function {
-                            params: vec![],
-                            return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location])))),
-                        },
-                        "succ_rates" => Type::Vec(Box::new(Type::Vec(Box::new(Type::Float)))),
-                        "contains_edge" => Type::Function {
-                            params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
-                            return_type: Box::new(Type::Bool),
-                        },
-                        "magic_state_qubits" | "alg_qubits" => Type::Function {
-                            params: vec![],
-                            return_type: Box::new(Type::Vec(Box::new(Type::Location)))
-                        },
-                        _ => Type::Unknown,
-                    }
+                Type::ArchT => match field.as_str() {
+                    "width" | "height" | "stack_size" => Type::Int,
+                    "edges" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![
+                            Type::Location,
+                            Type::Location,
+                        ])))),
+                    },
+                    "succ_rates" => Type::Vec(Box::new(Type::Vec(Box::new(Type::Float)))),
+                    "contains_edge" => Type::Function {
+                        params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
+                        return_type: Box::new(Type::Bool),
+                    },
+                    "magic_state_qubits" | "alg_qubits" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                    },
+                    _ => Type::Unknown,
                 },
                 Type::StateT => {
                     match field.as_str() {
@@ -366,26 +409,24 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                         "implemented_gates" => Type::Unknown,
                         _ => Type::Unknown,
                     }
-                },
-                Type::Gate => {
-                    match field.as_str() {
-                        "qubits" => Type::Vec(Box::new(Type::Qubit)),
-                        "gate_type" => Type::Function {
-                            params: vec![],
-                            return_type: Box::new(Type::Gate),
-                        },
-                        "implementation" => Type::Unknown,
-                        "x_indices" | "y_indices" | "z_indices" => Type::Function {
-                            params: vec![],
-                            return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
-                        },
-                        _ => Type::Unknown,
-                    }
+                }
+                Type::Gate => match field.as_str() {
+                    "qubits" => Type::Vec(Box::new(Type::Qubit)),
+                    "gate_type" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Gate),
+                    },
+                    "implementation" => Type::Unknown,
+                    "x_indices" | "y_indices" | "z_indices" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
+                    },
+                    _ => Type::Unknown,
                 },
                 Type::Unknown => Type::Unknown,
                 _ => Type::Unknown,
             }
-        },
+        }
 
         ExprKind::StructLiteral { name, fields } => {
             let mut field_types = HashMap::new();
@@ -397,12 +438,14 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 name: name.clone(),
                 fields: field_types,
             }
-        },
+        }
 
         ExprKind::IndexAccess { object, index } => {
             let obj_type = infer_expr_type(object, sym_table, diagnostics);
             let idx_type = infer_expr_type(index, sym_table, diagnostics);
 
+            // Skip validation for Unknown types to avoid false positives.
+            // Example: x.implementation.(path()) where x is Unknown.
             if obj_type == Type::Unknown {
                 return Type::Unknown;
             }
@@ -410,12 +453,13 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
             let expected_idx_type = match &obj_type {
                 Type::Vec(_) => Type::Int,
                 Type::QubitMap => Type::Qubit,
-                Type::Function { params, return_type } if params.is_empty() => {
-                    match return_type.as_ref() {
-                        Type::QubitMap => Type::Qubit,
-                        _ => Type::Int,
-                    }
-                }
+                Type::Function {
+                    params,
+                    return_type,
+                } if params.is_empty() => match return_type.as_ref() {
+                    Type::QubitMap => Type::Qubit,
+                    _ => Type::Int,
+                },
                 _ => Type::Int,
             };
 
@@ -423,14 +467,20 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                 diagnostics.push(Diagnostic {
                     range: index.range,
                     severity: Some(DiagnosticSeverity::ERROR),
-                    message: format!("Index type mismatch. Expected '{:?}' but got '{:?}'.", expected_idx_type, idx_type),
+                    message: format!(
+                        "Index type mismatch. Expected '{:?}' but got '{:?}'.",
+                        expected_idx_type, idx_type
+                    ),
                     ..Default::default()
                 });
             }
 
             // If object is a 0-arg function, auto-call it
             let actual_type = match obj_type {
-                Type::Function { params, return_type } if params.is_empty() => *return_type,
+                Type::Function {
+                    params,
+                    return_type,
+                } if params.is_empty() => *return_type,
                 other => other,
             };
 
@@ -448,12 +498,17 @@ pub fn infer_expr_type(expr: &Expr, sym_table: &mut SymbolTable, diagnostics: &m
                     Type::Unknown
                 }
             }
-        },
+        }
 
         _ => Type::Unknown,
     }
 }
 
+/// Checks if two types are compatible for assignment or comparison.
+///
+/// - Treats `Unknown` as compatible with all types to avoid cascading errors
+/// - Allows numeric leniency (Int ↔ Float)
+/// - Allows QubitMap indexing leniency (Qubit ↔ Int)
 fn types_compatible(t1: &Type, t2: &Type) -> bool {
     // Avoid Cascading errors
     if matches!(t1, Type::Unknown) || matches!(t2, Type::Unknown) {
@@ -461,17 +516,21 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
     }
 
     match (t1, t2) {
-        (Type::Int, Type::Int) |
-        (Type::Float, Type::Float) |
-        (Type::Bool, Type::Bool) |
-        (Type::String, Type::String) |
-        (Type::Location, Type::Location) |
-        (Type::Qubit, Type::Qubit) |
-        (Type::QubitMap, Type::QubitMap) |
-        (Type::Gate, Type::Gate) => true,
+        (Type::Int, Type::Int)
+        | (Type::Float, Type::Float)
+        | (Type::Bool, Type::Bool)
+        | (Type::String, Type::String)
+        | (Type::Location, Type::Location)
+        | (Type::Qubit, Type::Qubit)
+        | (Type::QubitMap, Type::QubitMap)
+        | (Type::Gate, Type::Gate) => true,
+
+        // Qubit/Int leniency - Qubit wraps usize, so Int literals are valid shorthand
+        (Type::Qubit, Type::Int) => true,
+        (Type::Int, Type::Qubit) => true,
 
         // Numeric leniency
-        (Type::Int, Type::Float) => true, 
+        (Type::Int, Type::Float) => true,
         (Type::Float, Type::Int) => true,
 
         (Type::ArchT, Type::ArchT) => true,
@@ -479,13 +538,28 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
 
         (Type::Vec(inner1), Type::Vec(inner2)) => types_compatible(inner1, inner2),
         (Type::Tuple(items1), Type::Tuple(items2)) => {
-            items1.len() == items2.len() && items1.iter().zip(items2).all(|(a, b)| types_compatible(a, b))
-        },
+            items1.len() == items2.len()
+                && items1
+                    .iter()
+                    .zip(items2)
+                    .all(|(a, b)| types_compatible(a, b))
+        }
         (Type::Option(inner1), Type::Option(inner2)) => types_compatible(inner1, inner2),
 
-        (Type::Function { params: p1, return_type: r1 }, Type::Function { params: p2, return_type: r2 }) => {
-            p1.len() == p2.len() && p1.iter().zip(p2).all(|(a, b)| types_compatible(a, b)) && types_compatible(r1, r2)
-        },
+        (
+            Type::Function {
+                params: p1,
+                return_type: r1,
+            },
+            Type::Function {
+                params: p2,
+                return_type: r2,
+            },
+        ) => {
+            p1.len() == p2.len()
+                && p1.iter().zip(p2).all(|(a, b)| types_compatible(a, b))
+                && types_compatible(r1, r2)
+        }
 
         _ => false,
     }
@@ -500,7 +574,7 @@ mod tests {
         assert!(types_compatible(&Type::Int, &Type::Int));
         assert!(types_compatible(&Type::Float, &Type::Float));
         assert!(types_compatible(&Type::Bool, &Type::Bool));
-        
+
         // Int/Float mixing (Leniency)
         assert!(types_compatible(&Type::Int, &Type::Float));
         assert!(types_compatible(&Type::Float, &Type::Int));
@@ -514,7 +588,7 @@ mod tests {
         assert!(types_compatible(&Type::Unknown, &Type::Int));
         assert!(types_compatible(&Type::Int, &Type::Unknown));
         assert!(types_compatible(&Type::Unknown, &Type::Unknown));
-        
+
         let vec_int = Type::Vec(Box::new(Type::Int));
         assert!(types_compatible(&Type::Unknown, &vec_int));
     }
@@ -523,14 +597,14 @@ mod tests {
     fn test_types_compatible_compound() {
         let vec_int = Type::Vec(Box::new(Type::Int));
         let vec_float = Type::Vec(Box::new(Type::Float));
-        
+
         assert!(types_compatible(&vec_int, &vec_int));
         assert!(types_compatible(&vec_int, &vec_float));
 
         let tuple1 = Type::Tuple(vec![Type::Int, Type::Float]);
         let tuple2 = Type::Tuple(vec![Type::Int, Type::Float]);
         let tuple3 = Type::Tuple(vec![Type::Int, Type::Bool]);
-    
+
         assert!(types_compatible(&tuple1, &tuple2));
         assert!(!types_compatible(&tuple1, &tuple3));
     }

@@ -1,4 +1,4 @@
-use amaro_lsp::parser::{parse_file, check_semantics};
+use amaro_lsp::parser::{check_semantics, parse_file};
 
 #[test]
 fn test_advanced_features_and_vectors() {
@@ -45,5 +45,9 @@ fn test_advanced_features_and_vectors() {
     for diag in &diags {
         println!("Diagnostic: {:?}", diag);
     }
-    assert!(diags.is_empty(), "Expected 0 diagnostics, found {}", diags.len());
+    assert!(
+        diags.is_empty(),
+        "Expected 0 diagnostics, found {}",
+        diags.len()
+    );
 }

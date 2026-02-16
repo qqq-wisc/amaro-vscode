@@ -62,7 +62,9 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "postinstall": "npm run build-lsp",
+    "build-lsp": "cd amaro-lsp && cargo build --release"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

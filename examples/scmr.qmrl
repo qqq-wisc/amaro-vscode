@@ -1,0 +1,38 @@
+// SCMR (Surface Code Mapping and Routing)
+// Advanced routing for fault-tolerant quantum computing with magic state distillation
+
+RouteInfo:
+    routed_gates = CX, T
+    GateRealization{path : Vec<Location>}
+    realize_gate =  
+        if (Gate.gate_type()) == CX 
+        then 
+            map(|x| -> GateRealization{path = x}, 
+                all_paths(Arch, 
+                    vertical_neighbors(State.map[Gate.qubits[0]], Arch.width, Arch.height), 
+                    horizontal_neighbors(State.map[Gate.qubits[1]], Arch.width), 
+                    ((values(State.map())).extend(Arch.magic_state_qubits()))
+                        .extend(fold(Vec(), |x, acc| -> acc.extend(x), 
+                            map(|x| -> x.implementation.(path()), State.implemented_gates())))))
+        else   
+            map(|x| -> GateRealization{path = x}, 
+                all_paths(Arch, 
+                    vertical_neighbors(State.map[Gate.qubits[0]], Arch.width, Arch.height), 
+                    fold(Vec(), |x, acc| -> acc.extend(x), 
+                        map(|x| -> horizontal_neighbors(x, Arch.width), Arch.magic_state_qubits())), 
+                    ((values(State.map())).extend(Arch.magic_state_qubits()))
+                        .extend(fold(Vec(), |x, acc| -> acc.extend(x),
+                            map(|x| -> x.implementation.(path()), State.implemented_gates())))))
+
+TransitionInfo:
+    Transition{na : Location}
+    get_transitions = (Vec()).push(Transition{na = Location(0)})
+    apply = identity_application(step)
+    cost = 0.0
+
+ArchInfo:
+    Arch{magic_state_qubits : Vec<Location>, alg_qubits : Vec<Location>, width : Int, height : Int}
+    get_locations = Arch.alg_qubits()
+
+StateInfo:
+    cost = 1.0

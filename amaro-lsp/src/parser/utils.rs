@@ -3,13 +3,19 @@ use tower_lsp::lsp_types::{Position, Range};
 pub fn calc_range(full_text: &str, start_offset: usize, length: usize) -> Range {
     let abs_start = start_offset;
     let abs_end = start_offset + length;
-    
+
     let (start_line, start_col) = byte_to_position(full_text, abs_start);
     let (end_line, end_col) = byte_to_position(full_text, abs_end);
 
     Range {
-        start: Position { line: start_line, character: start_col },
-        end: Position { line: end_line, character: end_col },
+        start: Position {
+            line: start_line,
+            character: start_col,
+        },
+        end: Position {
+            line: end_line,
+            character: end_col,
+        },
     }
 }
 

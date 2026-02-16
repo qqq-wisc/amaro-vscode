@@ -1,4 +1,4 @@
-use amaro_lsp::parser::parser::parse_file;
+use amaro_lsp::parser::core::parse_file;
 
 const FILE_1: &str = include_str!("../test_files/file1.qmrl");
 const FILE_3: &str = include_str!("../test_files/file3.qmrl");

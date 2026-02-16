@@ -1,8 +1,8 @@
-pub mod parser;
-pub mod semantics;
-pub mod utils;
+pub mod core;
 pub mod expr;
+pub mod semantics;
 pub mod symbols;
+pub mod utils;
 
-pub use parser::*;
+pub use core::*;
 pub use semantics::*;

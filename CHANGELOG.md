@@ -14,11 +14,16 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/).
 - **`stack_size` Arch Field:** Added `stack_size : Int` as a valid field on `ArchT` to support ILQ-style architectures.
 - **Gate Index Methods:** Added `x_indices()`, `y_indices()`, `z_indices()` to `Gate` type, each returning `Vec<Qubit>`.
 - **Unknown Index Leniency:** Indexing on an `Unknown` type (e.g. `x.implementation.(path())`) is now silently accepted without a false error.
+- **Examples Folder:** 4 production-ready `.qmrl` examples (NISQ, SCMR, ILQ, MQLSS) with detailed README.
+- **Documentation:** Complete CONTRIBUTING.md with architecture guide, contribution scenarios, and troubleshooting. Doc comments on all public functions.
+- **Auto-build:** `postinstall` npm script automatically builds LSP binary on `npm install`.
 
 ### Changed
 - **`State.map` is a Zero-Arg Function:** Changed from a plain property (`QubitMap`) to a zero-arg function (`() -> QubitMap`) so both `State.map` and `State.map()` work correctly.
 - **Index Error Message:** Improved to show the expected index type (e.g. `Expected 'Qubit' but got 'Int'`) instead of a generic message.
 - **`State.implemented_gates` Type:** Changed from `Vec<Gate>` to `Unknown` to accurately reflect its complex `HashSet<ImplementedGate<T>>` return type while avoiding false errors.
+- **Code Quality:** Fixed all Clippy warnings. Refactored `SymbolTable::new()` into named helper methods for maintainability.
+- **Debug Mode:** Moved AST debug helpers under `#[cfg(debug_assertions)]` for cleaner release builds.
 
 ### Fixed
 - Fixed false positives on `State.map[Gate.qubits[0]]` — the old check required all indexes to be `Int` regardless of the container type.

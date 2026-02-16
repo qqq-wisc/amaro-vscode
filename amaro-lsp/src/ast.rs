@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use tower_lsp::lsp_types::Range;
 use std::sync::atomic::{AtomicU32, Ordering};
+use tower_lsp::lsp_types::Range;
 
 // Global node ID counter for unique AST node identification
 static NEXT_NODE_ID: AtomicU32 = AtomicU32::new(0);
@@ -95,78 +95,78 @@ pub enum ExprKind {
     FloatLiteral(f64),
     StringLiteral(String),
     BoolLiteral(bool),
-    
+
     // Collections
     List(Vec<Expr>),
     Tuple(Vec<Expr>),
-    
+
     // Struct construction
     StructLiteral {
         name: String,
         fields: Vec<(String, Expr)>,
     },
-    
+
     // Function application
     FunctionCall {
         function: Box<Expr>,
         args: Vec<Expr>,
     },
-    
+
     // Field access
     FieldAccess {
         object: Box<Expr>,
         field: String,
     },
-    
+
     // Indexing
     IndexAccess {
         object: Box<Expr>,
         index: Box<Expr>,
     },
-    
+
     // Lambda expressions
     Lambda {
         params: Vec<String>,
         body: Box<Expr>,
     },
-    
+
     // Control flow
     IfThenElse {
         condition: Box<Expr>,
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
     },
-    
+
     // Let binding
     LetBinding {
         name: String,
         value: Box<Expr>,
         body: Box<Expr>,
     },
-    
+
     // Binary operations
     BinaryOp {
         op: BinaryOperator,
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    
+
     // Unary operations
     UnaryOp {
         op: UnaryOperator,
         operand: Box<Expr>,
     },
-    
+
     // Option types
     Some(Box<Expr>),
     None,
-    
+
     // Amaro-specific operators
     TensorProduct {
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    
+
     Projection {
         index: usize,
         tuple: Box<Expr>,
@@ -176,19 +176,29 @@ pub enum ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     // Arithmetic
-    Add, Sub, Mul, Div, Mod,
-    
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+
     // Comparison
-    Eq, Ne, Lt, Le, Gt, Ge,
-    
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+
     // Logical
-    And, Or,
-    
+    And,
+    Or,
+
     // Range
     Range,
-    
+
     // Amaro-specific
-    Tensor,  // ⊗
+    Tensor, // ⊗
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,37 +209,37 @@ pub enum UnaryOperator {
 
 impl Expr {
     pub fn new(kind: ExprKind, range: Range) -> Self {
-        Expr { 
-            kind, 
+        Expr {
+            kind,
             range,
             id: next_node_id(),
         }
     }
-    
+
     pub fn identifier(name: String, range: Range) -> Self {
         Expr::new(ExprKind::Identifier(name), range)
     }
-    
+
     pub fn int(value: i64, range: Range) -> Self {
         Expr::new(ExprKind::IntLiteral(value), range)
     }
-    
+
     pub fn float(value: f64, range: Range) -> Self {
         Expr::new(ExprKind::FloatLiteral(value), range)
     }
-    
+
     pub fn string(value: String, range: Range) -> Self {
         Expr::new(ExprKind::StringLiteral(value), range)
     }
-    
+
     pub fn bool(value: bool, range: Range) -> Self {
         Expr::new(ExprKind::BoolLiteral(value), range)
     }
-    
+
     pub fn summarize(&self) -> String {
         self.summarize_with_limit(50)
     }
-    
+
     pub fn summarize_with_limit(&self, limit: usize) -> String {
         let full = self.format_summary();
         if full.len() <= limit {
@@ -238,7 +248,7 @@ impl Expr {
             format!("{}...", &full[..limit.saturating_sub(3)])
         }
     }
-    
+
     fn format_summary(&self) -> String {
         match &self.kind {
             ExprKind::Identifier(name) => name.clone(),
@@ -250,26 +260,38 @@ impl Expr {
                 if items.is_empty() {
                     "[]".to_string()
                 } else if items.len() <= 3 {
-                    format!("[{}]", items.iter()
-                        .map(|e| e.format_summary())
-                        .collect::<Vec<_>>()
-                        .join(", "))
+                    format!(
+                        "[{}]",
+                        items
+                            .iter()
+                            .map(|e| e.format_summary())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 } else {
-                    format!("[{}, ... +{} more]", 
-                        items[0].format_summary(), 
-                        items.len() - 1)
+                    format!(
+                        "[{}, ... +{} more]",
+                        items[0].format_summary(),
+                        items.len() - 1
+                    )
                 }
             }
             ExprKind::Tuple(items) => {
                 if items.len() <= 2 {
-                    format!("({})", items.iter()
-                        .map(|e| e.format_summary())
-                        .collect::<Vec<_>>()
-                        .join(", "))
+                    format!(
+                        "({})",
+                        items
+                            .iter()
+                            .map(|e| e.format_summary())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 } else {
-                    format!("({}, ... +{} more)", 
-                        items[0].format_summary(), 
-                        items.len() - 1)
+                    format!(
+                        "({}, ... +{} more)",
+                        items[0].format_summary(),
+                        items.len() - 1
+                    )
                 }
             }
             ExprKind::StructLiteral { name, fields } => {
