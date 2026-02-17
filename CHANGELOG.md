@@ -4,6 +4,12 @@ All notable changes to the "amaro-vscode" extension will be documented in this f
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+## [1.0.1] - 2026-02-16
+
+### Fixed
+- Fixed missing syntax highlighting - moved `syntaxes/` folder to project root
+- Updated TextMate grammar path in package.json to `./syntaxes/amaro.tmLanguage.json`
+
 ## [1.0.0] - 2026-02-16
 
 ### Added

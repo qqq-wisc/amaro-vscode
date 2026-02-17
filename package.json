@@ -2,7 +2,7 @@
   "name": "amaro-vscode",
   "displayName": "Amaro Quantum Routing DSL",
   "description": "Syntax highlighting and LSP support for .qmrl files",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "keshavsharma-wisc",
   "license": "Apache-2.0",
   "engines": {
@@ -44,7 +44,7 @@
       {
         "language": "amaro",
         "scopeName": "source.amaro",
-        "path": "./src/ide/syntaxes/amaro.tmLanguage.json"
+        "path": "./syntaxes/amaro.tmLanguage.json"
       }
     ],
     "configuration": {
