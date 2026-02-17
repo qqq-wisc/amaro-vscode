@@ -1,9 +1,10 @@
 {
   "name": "amaro-vscode",
-  "displayName": "Amaro Language Support",
+  "displayName": "Amaro Quantum Routing DSL",
   "description": "Syntax highlighting and LSP support for .qmrl files",
   "version": "1.0.0",
   "publisher": "keshavsharma-wisc",
+  "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.106.1"
   },
