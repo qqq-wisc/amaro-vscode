@@ -166,7 +166,6 @@ pub fn infer_expr_type(
         ExprKind::BoolLiteral(_) => Type::Bool,
         ExprKind::StringLiteral(_) => Type::String,
         ExprKind::None => Type::Option(Box::new(Type::Unknown)),
-
         ExprKind::Identifier(name) => {
             if matches!(name.as_str(), "CX" | "T" | "Pauli" | "PauliMeasurement") {
                 return Type::Gate;
@@ -182,7 +181,6 @@ pub fn infer_expr_type(
                 Type::Unknown
             })
         }
-
         ExprKind::List(items) => {
             if items.is_empty() {
                 Type::Vec(Box::new(Type::Unknown))
@@ -203,19 +201,16 @@ pub fn infer_expr_type(
                 Type::Vec(Box::new(first_type))
             }
         }
-
         ExprKind::Tuple(items) => Type::Tuple(
             items
                 .iter()
                 .map(|e| infer_expr_type(e, sym_table, diagnostics))
                 .collect(),
         ),
-
         ExprKind::Some(inner) => {
             let inner_type = infer_expr_type(inner, sym_table, diagnostics);
             Type::Option(Box::new(inner_type))
         }
-
         ExprKind::Lambda { params, body } => {
             sym_table.enter_scope();
             let mut param_types = Vec::new();
@@ -231,7 +226,6 @@ pub fn infer_expr_type(
                 return_type: Box::new(return_type),
             }
         }
-
         ExprKind::LetBinding { name, value, body } => {
             sym_table.enter_scope();
             let value_type = infer_expr_type(value, sym_table, diagnostics);
@@ -240,7 +234,6 @@ pub fn infer_expr_type(
             sym_table.exit_scope();
             body_type
         }
-
         ExprKind::IfThenElse {
             condition,
             then_branch,
@@ -270,7 +263,6 @@ pub fn infer_expr_type(
             }
             then_type
         }
-
         ExprKind::FunctionCall { function, args } => {
             let func_type = infer_expr_type(function, sym_table, diagnostics);
             match func_type {
@@ -329,7 +321,6 @@ pub fn infer_expr_type(
                 }
             }
         }
-
         ExprKind::FieldAccess { object, field } => {
             let obj_type = infer_expr_type(object, sym_table, diagnostics);
             match obj_type {
@@ -427,7 +418,6 @@ pub fn infer_expr_type(
                 _ => Type::Unknown,
             }
         }
-
         ExprKind::StructLiteral { name, fields } => {
             let mut field_types = HashMap::new();
             for (key, value) in fields {
@@ -439,7 +429,6 @@ pub fn infer_expr_type(
                 fields: field_types,
             }
         }
-
         ExprKind::IndexAccess { object, index } => {
             let obj_type = infer_expr_type(object, sym_table, diagnostics);
             let idx_type = infer_expr_type(index, sym_table, diagnostics);
@@ -499,8 +488,194 @@ pub fn infer_expr_type(
                 }
             }
         }
+        ExprKind::BinaryOp { op, left, right } => {
+            let left_type = infer_expr_type(left, sym_table, diagnostics);
+            let right_type = infer_expr_type(right, sym_table, diagnostics);
 
-        _ => Type::Unknown,
+            if left_type != right_type {
+                diagnostics.push(Diagnostic {
+                    range: expr.range,
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    // TODO deal with auto-casting of Location
+                    message: "Currently, can only have a binary operation on two of the same types.".to_string(),
+                    ..Default::default()
+                });
+                return Type::Unknown
+            }
+
+            match left_type {
+                Type::Int | Type::Float => 
+                    match op {
+                        // same type as input
+                        BinaryOperator::Add
+                        | BinaryOperator::Sub
+                        | BinaryOperator::Div
+                        | BinaryOperator::Mul
+                        | BinaryOperator::Mod => left_type.clone(),
+
+                        BinaryOperator::Eq 
+                        | BinaryOperator::Ne
+                        | BinaryOperator::Lt
+                        | BinaryOperator::Le
+                        | BinaryOperator::Gt
+                        | BinaryOperator::Ge => Type::Bool,
+
+                        BinaryOperator::And
+                        | BinaryOperator::Or => {
+                            diagnostics.push(Diagnostic {
+                                range: expr.range,
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                message: format!("Cannot perform AND nor OR on the type {:?}.", left_type),
+                                ..Default::default()
+                            });
+                            Type::Unknown
+                        },
+                        BinaryOperator::Range => {
+                            diagnostics.push(Diagnostic {
+                                range: expr.range,
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                message: "Range behavior unknown.".to_string(), // TODO what should this be?
+                                ..Default::default()
+                            });
+                            Type::Unknown
+                        },
+                        BinaryOperator::Tensor => {
+                            diagnostics.push(Diagnostic {
+                                range: expr.range,
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                message: "Tensor behavior unknown.".to_string(), // TODO what should this be?
+                                ..Default::default()
+                            });
+                            Type::Unknown
+                        },
+                    }
+                ,
+                Type::Bool => match op {
+                    BinaryOperator::Add
+                    | BinaryOperator::Sub
+                    | BinaryOperator::Div
+                    | BinaryOperator::Mul
+                    | BinaryOperator::Mod => {
+                        diagnostics.push(Diagnostic {
+                            range: expr.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: "Cannot perform this operation on booleans.".to_string(),
+                            ..Default::default()
+                        });
+                        Type::Unknown
+                    },
+                    BinaryOperator::Eq 
+                    | BinaryOperator::Ne
+                    | BinaryOperator::Lt
+                    | BinaryOperator::Le
+                    | BinaryOperator::Gt
+                    | BinaryOperator::Ge => Type::Bool,
+
+                    BinaryOperator::And
+                    | BinaryOperator::Or => Type::Bool,
+
+                    BinaryOperator::Range => {
+                        diagnostics.push(Diagnostic {
+                            range: expr.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: "Range behavior unknown.".to_string(), // TODO what should this be?
+                            ..Default::default()
+                        });
+                        Type::Unknown
+                    },
+                    BinaryOperator::Tensor => {
+                        diagnostics.push(Diagnostic {
+                            range: expr.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: "Tensor behavior unknown.".to_string(), // TODO what should this be?
+                            ..Default::default()
+                        });
+                        Type::Unknown
+                    },
+                },
+                _ => {
+                    diagnostics.push(Diagnostic {
+                        range: expr.range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        // TODO is this really all of them? Surely other types may participate.
+                        message: format!("Type '{:?}' is undefined for participating in binary operations.", left_type),
+                        ..Default::default()
+                    });
+
+                    Type::Unknown
+
+                }
+            }
+        },
+        ExprKind::UnaryOp { op, operand } => {
+            let operand_type = infer_expr_type(operand, sym_table, diagnostics);
+            match op {
+                UnaryOperator::Not => match operand_type {
+                    Type::Bool => Type::Bool,
+                    _ => {
+                        diagnostics.push(Diagnostic {
+                            range: expr.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            // TODO is this really all of them? Surely other types may participate.
+                            message: "Cannot perform NOT operation on non-bool type.".to_string(),
+                            ..Default::default()
+                        });
+                        Type::Unknown
+                    }
+                    
+                },
+                UnaryOperator::Neg => match operand_type {
+                    Type::Int => Type::Int,
+                    Type::Float => Type::Float,
+                    _ => {
+                        diagnostics.push(Diagnostic {
+                            range: expr.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            // TODO is this really all of them? Surely other types may participate.
+                            message: "Cannot perform NEG operation on non-number type.".to_string(),
+                            ..Default::default()
+                        });
+                        Type::Unknown
+                    }
+                    
+                },
+            }
+        },
+        ExprKind::TensorProduct { left, right } => todo!(), // TODO what to do here?
+        ExprKind::Projection { index, tuple } => {
+            match &tuple.kind {
+                ExprKind::Tuple(exprs) => {
+                    match exprs.get(*index) {
+                        Some(found_expr) => {
+                            infer_expr_type(found_expr, sym_table, diagnostics)
+                        },
+                        None => {
+                            diagnostics.push(Diagnostic {
+                                range: expr.range,
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                // TODO is this really all of them? Surely other types may participate.
+                                message: "Index of projection was out-of-bounds for the tuple.".to_string(),
+                                ..Default::default()
+                            });
+                            Type::Unknown
+                        }
+                    }
+                },
+                _ => {
+                    diagnostics.push(Diagnostic {
+                        range: expr.range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        // TODO is this really all of them? Surely other types may participate.
+                        message: "Cannot perform projection on non-tuple.".to_string(),
+                        ..Default::default()
+                    });
+                    Type::Unknown
+                }
+            }
+
+            
+        },
+        _ => Type::Unknown
     }
 }
 
@@ -562,6 +737,208 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
         }
 
         _ => false,
+    }
+}
+
+
+struct Suggestion {
+    completion_text: String,
+    completion_type: Type,
+}
+
+/// From a given type, identifies autocomplete suggestions.
+/// This would be what comes after the '.'
+fn suggest_next_from_type(t1: &Type) -> Option<Vec<Suggestion>> {
+    match t1 {
+        Type::Int
+        | Type::Float
+        | Type::Bool => None,
+        Type::String => None, // not sure
+        Type::Location => None, // not sure
+        Type::Qubit => None, // not sure
+        Type::QubitMap => None, // not sure
+        Type::Gate => Some(vec![
+                Suggestion {
+                    completion_text: "qubits".to_string(),
+                    completion_type: Type::Vec(Box::new(Type::Qubit))
+                },
+                Suggestion {
+                    completion_text: "gate_type".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Gate),
+                    }
+                },
+                Suggestion {
+                    completion_text: "implementation".to_string(),
+                    completion_type: Type::Unknown
+                },
+                Suggestion {
+                    completion_text: "x_indices".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
+                    },
+                },
+                Suggestion {
+                    completion_text: "y_indices".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
+                    },
+                },
+                Suggestion {
+                    completion_text: "z_indices".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
+                    },
+                }
+                
+            ]),
+        Type::ArchT => Some(vec![
+            Suggestion {
+                completion_text: "width".to_string(),
+                completion_type: Type::Int
+            },
+            Suggestion {
+                completion_text: "height".to_string(),
+                completion_type: Type::Int
+            },
+            Suggestion {
+                completion_text: "stack_size".to_string(),
+                completion_type: Type::Int
+            },
+            Suggestion {
+                completion_text: "edges".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![
+                        Type::Location,
+                        Type::Location,
+                    ])))),
+                }
+            },
+            Suggestion {
+                completion_text: "succ_rates".to_string(),
+                completion_type: Type::Vec(Box::new(Type::Vec(Box::new(Type::Float))))
+            },
+
+            Suggestion {
+                completion_text: "contains_edge".to_string(),
+                completion_type: Type::Function {
+                    params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
+                    return_type: Box::new(Type::Bool),
+                }
+            },
+
+            Suggestion {
+                completion_text: "magic_state_qubits".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                }
+            },
+
+            Suggestion {
+                completion_text: "alg_qubits".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                }
+            },
+        ]),
+        Type::StateT => Some(vec![
+            Suggestion {
+                completion_text: "map".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::QubitMap),
+                }
+            },
+            Suggestion {
+                completion_text: "gates".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::Vec(Box::new(Type::Gate))),
+                }
+            },
+            Suggestion {
+                completion_text: "implemented_gates".to_string(),
+                completion_type: Type::Unknown
+            }
+        ]),
+        Type::InstrT => None, // not sure
+        Type::Vec(inner) => Some(vec![
+            Suggestion {
+                completion_text: "push".to_string(),
+                completion_type: Type::Function {
+                            params: vec![*inner.clone()],
+                            return_type: Box::new(Type::Vec(inner.clone())),
+                        },
+            },
+            Suggestion {
+                completion_text: "pop".to_string(),
+                completion_type: Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Option(inner.clone())),
+                        }
+            },
+            Suggestion {
+                completion_text: "extend".to_string(),
+                completion_type: Type::Function {
+                            params: vec![Type::Vec(inner.clone())],
+                            return_type: Box::new(Type::Vec(inner.clone())),
+                        }
+            }
+            ,
+            Suggestion {
+                completion_text: "is_empty".to_string(),
+                completion_type: Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Bool),
+                        }
+            }
+            ,
+            Suggestion {
+                completion_text: "contains".to_string(),
+                completion_type: Type::Function {
+                            params: vec![*inner.clone()],
+                            return_type: Box::new(Type::Bool),
+                        }
+            }
+            ,
+            Suggestion {
+                completion_text: "len".to_string(),
+                completion_type: Type::Int
+            }
+        ]),
+        Type::Tuple(items) => {
+            // show autocomplete for each item
+            if items.len() == 0 {
+                None
+            } else {
+                Some(items.iter().enumerate()
+                    .map(
+                        |(index, item)| Suggestion {
+                            completion_text: format!("{}", index),
+                            completion_type: item.clone()})
+                    .collect())
+            }
+        },
+        Type::Option(nested) => Some(vec![
+            Suggestion { // TODO to be clear, I don't know that this is what we want.
+            // I'm assuming we want an unwrap for options.
+            // What else hould options have?
+                completion_text: "unwrap".to_string(),
+                completion_type: Type::Function { params: vec![], return_type: nested.clone() }
+            }
+        ]),
+        Type::Function { params, return_type } => None, // no suggestions for .
+        Type::Struct { fields, .. } => {
+            Some(fields.iter().map(|entry| Suggestion{completion_text: entry.0.clone(), completion_type: entry.1.clone()}).collect())
+        },
+        Type::Unknown => todo!(),
     }
 }
 

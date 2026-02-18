@@ -1,5 +1,9 @@
 use tower_lsp::lsp_types::{Position, Range};
 
+use crate::ast::AmaroFile;
+use crate::ast::Expr;
+use crate::ast::BlockContent;
+
 pub fn calc_range(full_text: &str, start_offset: usize, length: usize) -> Range {
     let abs_start = start_offset;
     let abs_end = start_offset + length;
@@ -27,4 +31,21 @@ pub fn byte_to_position(text: &str, byte_idx: usize) -> (u32, u32) {
     let last_line_start = slice.rfind('\n').map(|i| i + 1).unwrap_or(0);
     let col = (safe_idx - last_line_start) as u32;
     (line, col)
+}
+
+pub fn expr_at_position(file: &AmaroFile, position: Position) -> Option<&Expr> {
+    let block = file.blocks.iter().find(|block| block.range.start <= position && block.range.end > position);
+    
+    if let None = block {
+        return None;
+    }
+    let block_items = match &block.unwrap().content {
+        crate::ast::BlockContent::Fields(block_items) => block_items,
+    };
+    
+    block_items.iter().filter_map(|item| match item {
+        crate::ast::BlockItem::Field(field) => Some(field),
+        crate::ast::BlockItem::StructDef(_) => None,
+    }).find(|field| field.value_range.start <= position && field.value_range.end > position)
+    .map(|field| &field.value)
 }

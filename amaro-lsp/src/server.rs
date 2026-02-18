@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_lsp::jsonrpc::Result;
+use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
-use crate::parser::{check_semantics, parse_file};
+use crate::parser::{check_semantics, parse_file, semantics, utils};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -394,6 +394,11 @@ impl LanguageServer for Backend {
                 )),
 
                 document_symbol_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions { 
+                    resolve_provider: Some(false), 
+                    trigger_characters: Some(vec!['.'.to_string()]), 
+                    ..Default::default()
+                }),
 
                 ..Default::default()
             },
@@ -466,5 +471,37 @@ impl LanguageServer for Backend {
         }
 
         Ok(None)
+    }
+
+    async fn completion(
+        &self,
+        params: CompletionParams
+    ) -> Result<Option<CompletionResponse>> {
+
+        // get the text doc
+        let uri = params.text_document_position.text_document.uri;
+        let guard = self.documents.read().await;
+        let file_content = guard.get(&uri);
+
+        if let None = file_content {
+            return Err(Error::new(ErrorCode::InvalidRequest))
+        }
+
+        let string_content = file_content.unwrap();
+
+        let amaro_file = match parse_file(string_content) {
+            Ok(f) => f,
+            Err(_) => return Err(Error::new(ErrorCode::ParseError))
+        };
+
+        // TODO
+        // just using expr inference wont work.
+        // first, we need to walk the whole file, so that we can learn of identifiers.
+        // then, we must get the type of just the last part in the chain there.
+        // let expr = utils::exprs_at_position(&amaro_file, params.text_document_position.position);
+        
+        // need to walk whole thing, not just this expr, bc 
+
+        todo!()
     }
 }
