@@ -1,6 +1,6 @@
 [package]
 name = "amaro-lsp"
-version = "1.0.0"
+version = "1.0.2"
 edition = "2024"
 description = "Language server for the Amaro quantum routing DSL"
 
