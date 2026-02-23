@@ -2,7 +2,7 @@ use super::symbols::*;
 use crate::ast::*;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range, Url,
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionItemTag, Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range, Url
 };
 
 /// Performs semantic analysis on a parsed Amaro file.
@@ -11,6 +11,7 @@ use tower_lsp::lsp_types::{
 /// Returns diagnostics for LSP clients.
 pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+
 
     let known_blocks = [
         "GateRealization",
@@ -76,12 +77,13 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
 
         // 3. Type Check all fields
         let mut sym_table = SymbolTable::new();
+        let mut type_map: HashMap<NodeId, Type> = HashMap::new();
         let mut present_keys: Vec<&str> = Vec::new();
         let BlockContent::Fields(items) = &block.content;
         for item in items {
             if let BlockItem::Field(field) = item {
                 present_keys.push(field.key.as_str());
-                infer_expr_type(&field.value, &mut sym_table, &mut diagnostics);
+                infer_expr_type(&field.value, &mut sym_table, &mut diagnostics, &mut type_map);
 
                 // 3.1. Gate Validation in 'routed_gates' fields
                 if block_name == "RouteInfo" && field.key == "routed_gates" {
@@ -151,6 +153,7 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
+
 /// Infers the type of an expression using the current symbol table.
 /// (Type Inference Engine)
 /// Recursively walks the AST and emits type errors for incompatibilities.
@@ -159,8 +162,9 @@ pub fn infer_expr_type(
     expr: &Expr,
     sym_table: &mut SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
+    type_map: &mut HashMap<NodeId, Type>
 ) -> Type {
-    match &expr.kind {
+    let found_type = match &expr.kind {
         ExprKind::IntLiteral(_) => Type::Int,
         ExprKind::FloatLiteral(_) => Type::Float,
         ExprKind::BoolLiteral(_) => Type::Bool,
@@ -185,9 +189,9 @@ pub fn infer_expr_type(
             if items.is_empty() {
                 Type::Vec(Box::new(Type::Unknown))
             } else {
-                let first_type = infer_expr_type(&items[0], sym_table, diagnostics);
+                let first_type = infer_expr_type(&items[0], sym_table, diagnostics, type_map);
                 for item in &items[1..] {
-                    let item_type = infer_expr_type(item, sym_table, diagnostics);
+                    let item_type = infer_expr_type(item, sym_table, diagnostics, type_map);
                     if item_type != first_type {
                         diagnostics.push(Diagnostic {
                             range: item.range,
@@ -204,11 +208,11 @@ pub fn infer_expr_type(
         ExprKind::Tuple(items) => Type::Tuple(
             items
                 .iter()
-                .map(|e| infer_expr_type(e, sym_table, diagnostics))
+                .map(|e| infer_expr_type(e, sym_table, diagnostics, type_map))
                 .collect(),
         ),
         ExprKind::Some(inner) => {
-            let inner_type = infer_expr_type(inner, sym_table, diagnostics);
+            let inner_type = infer_expr_type(inner, sym_table, diagnostics, type_map);
             Type::Option(Box::new(inner_type))
         }
         ExprKind::Lambda { params, body } => {
@@ -218,7 +222,7 @@ pub fn infer_expr_type(
                 sym_table.bind(param.clone(), Type::Unknown);
                 param_types.push(Type::Unknown);
             }
-            let return_type = infer_expr_type(body, sym_table, diagnostics);
+            let return_type = infer_expr_type(body, sym_table, diagnostics, type_map);
             sym_table.exit_scope();
 
             Type::Function {
@@ -228,9 +232,9 @@ pub fn infer_expr_type(
         }
         ExprKind::LetBinding { name, value, body } => {
             sym_table.enter_scope();
-            let value_type = infer_expr_type(value, sym_table, diagnostics);
+            let value_type = infer_expr_type(value, sym_table, diagnostics, type_map);
             sym_table.bind(name.clone(), value_type);
-            let body_type = infer_expr_type(body, sym_table, diagnostics);
+            let body_type = infer_expr_type(body, sym_table, diagnostics, type_map);
             sym_table.exit_scope();
             body_type
         }
@@ -239,7 +243,7 @@ pub fn infer_expr_type(
             then_branch,
             else_branch,
         } => {
-            let cond_type = infer_expr_type(condition, sym_table, diagnostics);
+            let cond_type = infer_expr_type(condition, sym_table, diagnostics, type_map);
             if !types_compatible(&cond_type, &Type::Bool) {
                 diagnostics.push(Diagnostic {
                     range: condition.range,
@@ -249,8 +253,8 @@ pub fn infer_expr_type(
                 });
             }
 
-            let then_type = infer_expr_type(then_branch, sym_table, diagnostics);
-            let else_type = infer_expr_type(else_branch, sym_table, diagnostics);
+            let then_type = infer_expr_type(then_branch, sym_table, diagnostics, type_map);
+            let else_type = infer_expr_type(else_branch, sym_table, diagnostics, type_map);
 
             if !types_compatible(&then_type, &else_type) {
                 diagnostics.push(Diagnostic {
@@ -264,7 +268,7 @@ pub fn infer_expr_type(
             then_type
         }
         ExprKind::FunctionCall { function, args } => {
-            let func_type = infer_expr_type(function, sym_table, diagnostics);
+            let func_type = infer_expr_type(function, sym_table, diagnostics, type_map);
             match func_type {
                 Type::Function {
                     params,
@@ -284,7 +288,7 @@ pub fn infer_expr_type(
                         return *return_type;
                     }
                     for (i, (param_type, arg)) in params.iter().zip(args).enumerate() {
-                        let arg_type = infer_expr_type(arg, sym_table, diagnostics);
+                        let arg_type = infer_expr_type(arg, sym_table, diagnostics, type_map);
 
                         // Following Logic
                         // 1. If param_type Unknown, Accept
@@ -322,7 +326,7 @@ pub fn infer_expr_type(
             }
         }
         ExprKind::FieldAccess { object, field } => {
-            let obj_type = infer_expr_type(object, sym_table, diagnostics);
+            let obj_type = infer_expr_type(object, sym_table, diagnostics, type_map);
             match obj_type {
                 Type::Vec(inner) => {
                     if field == "push" {
@@ -421,7 +425,7 @@ pub fn infer_expr_type(
         ExprKind::StructLiteral { name, fields } => {
             let mut field_types = HashMap::new();
             for (key, value) in fields {
-                let val_type = infer_expr_type(value, sym_table, diagnostics);
+                let val_type = infer_expr_type(value, sym_table, diagnostics, type_map);
                 field_types.insert(key.clone(), val_type);
             }
             Type::Struct {
@@ -430,8 +434,8 @@ pub fn infer_expr_type(
             }
         }
         ExprKind::IndexAccess { object, index } => {
-            let obj_type = infer_expr_type(object, sym_table, diagnostics);
-            let idx_type = infer_expr_type(index, sym_table, diagnostics);
+            let obj_type = infer_expr_type(object, sym_table, diagnostics, type_map);
+            let idx_type = infer_expr_type(index, sym_table, diagnostics, type_map);
 
             // Skip validation for Unknown types to avoid false positives.
             // Example: x.implementation.(path()) where x is Unknown.
@@ -489,8 +493,8 @@ pub fn infer_expr_type(
             }
         }
         ExprKind::BinaryOp { op, left, right } => {
-            let left_type = infer_expr_type(left, sym_table, diagnostics);
-            let right_type = infer_expr_type(right, sym_table, diagnostics);
+            let left_type = infer_expr_type(left, sym_table, diagnostics, type_map);
+            let right_type = infer_expr_type(right, sym_table, diagnostics, type_map);
 
             if left_type != right_type {
                 diagnostics.push(Diagnostic {
@@ -608,7 +612,7 @@ pub fn infer_expr_type(
             }
         },
         ExprKind::UnaryOp { op, operand } => {
-            let operand_type = infer_expr_type(operand, sym_table, diagnostics);
+            let operand_type = infer_expr_type(operand, sym_table, diagnostics, type_map);
             match op {
                 UnaryOperator::Not => match operand_type {
                     Type::Bool => Type::Bool,
@@ -647,7 +651,7 @@ pub fn infer_expr_type(
                 ExprKind::Tuple(exprs) => {
                     match exprs.get(*index) {
                         Some(found_expr) => {
-                            infer_expr_type(found_expr, sym_table, diagnostics)
+                            infer_expr_type(found_expr, sym_table, diagnostics, type_map)
                         },
                         None => {
                             diagnostics.push(Diagnostic {
@@ -676,7 +680,11 @@ pub fn infer_expr_type(
             
         },
         _ => Type::Unknown
-    }
+    };
+    type_map.insert(expr.id, found_type.clone());
+
+    found_type
+
 }
 
 /// Checks if two types are compatible for assignment or comparison.
@@ -741,14 +749,80 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
 }
 
 
-struct Suggestion {
-    completion_text: String,
-    completion_type: Type,
+
+
+pub struct Suggestion {
+    pub completion_text: String,
+    pub completion_type: Type,
+}
+
+impl Suggestion {
+    fn get_completion_item_kind(&self) -> CompletionItemKind {
+        match &self.completion_type {
+            Type::Int => CompletionItemKind::FIELD,
+            Type::Float => CompletionItemKind::FIELD,
+            Type::Bool => CompletionItemKind::FIELD,
+            Type::String => CompletionItemKind::FIELD,
+            Type::Location => CompletionItemKind::STRUCT,
+            Type::Qubit => CompletionItemKind::STRUCT,
+            Type::QubitMap => CompletionItemKind::STRUCT,
+            Type::Gate => CompletionItemKind::STRUCT,
+            Type::ArchT => CompletionItemKind::STRUCT,
+            Type::StateT => CompletionItemKind::STRUCT,
+            Type::InstrT => CompletionItemKind::STRUCT,
+            Type::Vec(..) => CompletionItemKind::VARIABLE,
+            Type::Tuple(..) => CompletionItemKind::VARIABLE,
+            Type::Option(..) => CompletionItemKind::ENUM,
+            Type::Function { .. } => CompletionItemKind::FUNCTION,
+            Type::Struct { .. } => CompletionItemKind::STRUCT,
+            _ => CompletionItemKind::CONSTANT,
+        }
+    }
+
+    fn get_completion_item_label_details(&self) -> CompletionItemLabelDetails {
+        CompletionItemLabelDetails {
+            detail: match &self.completion_type {
+                Type::Vec(..) => Some(": Array".to_string()),
+                Type::Tuple(..) => Some(": Tuple".to_string()),
+                Type::Function { .. } => Some(": Function".to_string()),
+                Type::Struct {..} => Some(": Struct".to_string()),
+                _ => None
+            },
+            description: Some(format!("{}", self.completion_type))
+        }
+    }
+
+    fn get_completion_item_detail(&self) -> String {
+        format!("{}", self.completion_type)
+    }
+
+    pub fn to_completion_item(&self) -> CompletionItem {
+        CompletionItem { 
+            label: self.completion_text.clone(), 
+            label_details: Some(self.get_completion_item_label_details()), 
+            kind: Some(self.get_completion_item_kind()), 
+            detail: Some(self.get_completion_item_detail()), 
+            documentation: None, 
+            deprecated: Some(false), 
+            preselect: Some(false), 
+            sort_text: None,
+            filter_text: None, 
+            insert_text: None,
+            insert_text_format: None, 
+            insert_text_mode: None, 
+            text_edit: None, 
+            additional_text_edits: None, 
+            command: None, 
+            commit_characters: None, 
+            data: None, 
+            tags: None 
+        }
+    }
 }
 
 /// From a given type, identifies autocomplete suggestions.
 /// This would be what comes after the '.'
-fn suggest_next_from_type(t1: &Type) -> Option<Vec<Suggestion>> {
+pub fn suggest_next_from_type(t1: &Type) -> Option<Vec<Suggestion>> {
     match t1 {
         Type::Int
         | Type::Float
@@ -938,7 +1012,7 @@ fn suggest_next_from_type(t1: &Type) -> Option<Vec<Suggestion>> {
         Type::Struct { fields, .. } => {
             Some(fields.iter().map(|entry| Suggestion{completion_text: entry.0.clone(), completion_type: entry.1.clone()}).collect())
         },
-        Type::Unknown => todo!(),
+        Type::Unknown => None,
     }
 }
 

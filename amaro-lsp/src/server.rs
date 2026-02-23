@@ -6,7 +6,8 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
-use crate::parser::{check_semantics, parse_file, semantics, utils};
+use crate::parser::symbols::{SymbolTable, Type};
+use crate::parser::{check_semantics, infer_expr_type, parse_file, semantics, utils};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -394,9 +395,9 @@ impl LanguageServer for Backend {
                 )),
 
                 document_symbol_provider: Some(OneOf::Left(true)),
-                completion_provider: Some(CompletionOptions { 
-                    resolve_provider: Some(false), 
-                    trigger_characters: Some(vec!['.'.to_string()]), 
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec!['.'.to_string()]),
                     ..Default::default()
                 }),
 
@@ -473,35 +474,151 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    async fn completion(
-        &self,
-        params: CompletionParams
-    ) -> Result<Option<CompletionResponse>> {
-
+    /// runs when '.' is typed.
+    /// TODO why is this running on every character??
+    /// TODO fix up the thing where lists have a trailing , 
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         // get the text doc
         let uri = params.text_document_position.text_document.uri;
         let guard = self.documents.read().await;
         let file_content = guard.get(&uri);
 
         if let None = file_content {
-            return Err(Error::new(ErrorCode::InvalidRequest))
+            return Err(Error::new(ErrorCode::InvalidRequest));
         }
 
         let string_content = file_content.unwrap();
 
+        // get original position of cursor. this is after the dot.
+        let orig_pos = params.text_document_position.position;
+        // TODO hmm, i think i should only have to sub by 1.
+        // this doesn't please me.
+        let dot_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(2));
+
+        // determine if . was typed
+        match utils::get_char_at(string_content, dot_pos) {
+            None => {
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        "Position was not within bounds of document.",
+                    )
+                    .await;
+                return Ok(None)
+            },
+            Some('.') => {}, // matched the dot!
+            Some(c) => {
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("Found character '{}' for completion.",c),
+                    )
+                    .await;
+                return Ok(None)
+            } // we matched the dot
+        }
+
+
+        // parse the file into expressions
         let amaro_file = match parse_file(string_content) {
             Ok(f) => f,
-            Err(_) => return Err(Error::new(ErrorCode::ParseError))
+            Err(_) => return Err(Error::new(ErrorCode::ParseError)),
         };
-
-        // TODO
-        // just using expr inference wont work.
-        // first, we need to walk the whole file, so that we can learn of identifiers.
-        // then, we must get the type of just the last part in the chain there.
-        // let expr = utils::exprs_at_position(&amaro_file, params.text_document_position.position);
         
-        // need to walk whole thing, not just this expr, bc 
 
-        todo!()
+        // so, we have [stuff][.][cursor]
+        // we need to look 2 chars before
+        let new_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(2));
+
+        
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!("Checking for expr at position {:?}", new_pos),
+            )
+            .await;
+
+        // find the largest expression containing this position before the dot
+        let containing_expr = utils::largest_expr_containing(&amaro_file, new_pos);
+
+        match containing_expr {
+            // if we had an expression containing our goal pos...
+            Ok(e) => {
+
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("\tFound expression {} containing position.", e.kind),
+                    )
+                    .await;
+                let mut sym_table = SymbolTable::new();
+                let mut type_map: HashMap<NodeId, Type> = HashMap::new();
+                let mut diags: Vec<Diagnostic> = Vec::new();
+
+                // explore the expr
+                infer_expr_type(e, &mut sym_table, &mut diags, &mut type_map);
+
+                // now, need to find the expr right before our cursor, and get
+                // the type of that one.
+                // expr should end at the dot i think?
+                let goal_pos = Position::new(new_pos.line, new_pos.character + 1);
+
+                match utils::find_finishing_subexpr(e, goal_pos) {
+                    Some(perfect_end_expr) => {
+                        self.client
+                            .log_message(
+                                MessageType::INFO,
+                                format!("\tFound perfectly finishing expression {}", perfect_end_expr.kind),
+                            )
+                            .await;
+
+                        // get the types and stuff
+                        let found_type = match type_map.get(&perfect_end_expr.id) {
+                            Some(t) => t,
+                            None => return Err(Error::new(ErrorCode::InternalError)),
+                        };
+
+                        self.client
+                            .log_message(
+                                MessageType::INFO,
+                                format!("\tHas type {:?}", found_type),
+                            )
+                            .await;
+
+                        
+
+                        match semantics::suggest_next_from_type(&found_type) {
+                            Some(suggestions) => Ok(Some(CompletionResponse::Array(
+                                suggestions
+                                    .iter()
+                                    .map(|sug| sug.to_completion_item())
+                                    .collect(),
+                            ))),
+                            None => Ok(None), // don't show suggestions then!
+                        }
+                    }
+                    // expression doesn't end at anything
+                    None => {
+                        self.client
+                            .log_message(
+                                MessageType::INFO,
+                                "\tNo perfect ending expression found.".to_string(),
+                            )
+                            .await;
+                        Ok(None)
+                    },
+                }
+            }
+            // if we lacked an expression containing our goal pos...
+            Err(_) => {
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        "\tNo expression found containg the position.".to_string(),
+                    )
+                    .await;
+                Ok(None) //
+            },
+        }
     }
 }

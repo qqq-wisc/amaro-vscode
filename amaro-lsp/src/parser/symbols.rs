@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Write};
 
 /// The type system for Amaro expressions.
 ///
@@ -42,6 +42,55 @@ pub enum Type {
     },
 
     Unknown,
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Int => f.write_str("int"),
+            Type::Float => f.write_str("float"),
+            Type::Bool => f.write_str("bool"),
+            Type::String => f.write_str("string"),
+            Type::Location => f.write_str("Location"),
+            Type::Qubit => f.write_str("Qubit"),
+            Type::QubitMap => f.write_str("QubitMap"),
+            Type::Gate => f.write_str("Gate"),
+            Type::ArchT => f.write_str("Arch"),
+            Type::StateT => f.write_str("State"),
+            Type::InstrT => f.write_str("Instr"),
+            Type::Vec(inner) => f.write_str("Vec<").and(inner.fmt(f)).and(f.write_char('>')),
+            Type::Tuple(items) => {
+                f.write_char('(')?;
+                let mut iter = items.iter();
+                if let Some(first) = iter.next() {
+
+                    write!(f, "{}", first)?;
+                    for item in iter {
+                        f.write_str(", ")?;
+                        write!(f, "{}", item)?;
+                    }
+                }
+                f.write_char(')')
+            }, // make this pleasant..
+            Type::Option(inner) => f.write_str("Option<").and(inner.fmt(f)).and(f.write_char('>')),
+            Type::Function { params, return_type } => {
+                f.write_char('(')?;
+                let mut iter = params.iter();
+                if let Some(first) = iter.next() {
+
+                    write!(f, "{}", first)?;
+                    for item in iter {
+                        f.write_str(", ")?;
+                        write!(f, "{}", item)?;
+                    }
+                }
+                f.write_str(") -> ")?;
+                return_type.fmt(f)
+            },
+            Type::Struct { name, fields } => f.write_str(name),
+            Type::Unknown => f.write_char('?'),
+        }
+    }
 }
 
 /// A scoped symbol table for tracking variable bindings and their types.
