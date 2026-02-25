@@ -40,7 +40,7 @@ pub enum Type {
     UserDef(String),
 
     // Struct types
-    Struct {
+    Struct { // TODO unhappy with this. I feel the info is redundant..
         name: String,
         fields: HashMap<String, Type>,
     },
@@ -51,10 +51,10 @@ pub enum Type {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Int => f.write_str("int"),
-            Type::Float => f.write_str("float"),
-            Type::Bool => f.write_str("bool"),
-            Type::String => f.write_str("string"),
+            Type::Int => f.write_str("Int"),
+            Type::Float => f.write_str("Float"),
+            Type::Bool => f.write_str("Bool"),
+            Type::String => f.write_str("String"),
             Type::Location => f.write_str("Location"),
             Type::Qubit => f.write_str("Qubit"),
             Type::QubitMap => f.write_str("QubitMap"),
@@ -386,46 +386,27 @@ impl Default for SymbolTable {
     }
 }
 
-/// For built-in keywords. Identifies the expected type.
-/// For instance, the cost function has an expected type.
-pub struct KeywordTable {
-    /// maps from function names to their signatures
-    functions: HashMap<String, KeywordInfo>
-}
-
-pub struct KeywordInfo {
-    typ: Type,
-    description: String
-}
-
-
-
-impl KeywordTable {
-    /// Makes a KeywordTable with all the built-in signatures
-    pub fn new() -> Self {
-
-        let mut functions: HashMap<String, KeywordInfo> = HashMap::new();
-
-        // do the functions
-        // hmm.. i dont actually know the types of many of them
-
-        // TODO is this the correct signature for cost?
-        functions.insert(
-            "cost".to_string(), 
-
-            KeywordInfo { typ: Type::Function { params: vec![Type::UserDef("Transition".to_string())], return_type: Box::new(Type::Float) }
-            , description: "Explanation for cost function.\nFunction which determines cost of transitions.".to_string() }
-            
-            );
-        
-        KeywordTable { functions: functions }
+/// Blocks have fields.
+/// Fields each have an expected type signature.
+/// For instance, cost maps from Transition to Float.
+/// This lets us lookup the expected type signature of a field.
+pub fn field_lookup(field: &str) -> Option<Type> {
+    match field {
+        "cost" => Some(Type::Function { params: vec![Type::UserDef("Transition".to_string())], return_type: Box::new(Type::Float) }),
+        "realize_gate" => Some(Type::Function { params: vec![
+            Type::ArchT,
+            Type::StateT,
+            Type::Gate
+        ], return_type: Box::new(Type::Vec(Box::new(Type::UserDef("GateRealization".to_string())))) }),
+        "get_transitions" => Some(Type::Function { params: vec![
+            Type::ArchT,
+            Type::StateT
+        ], return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))) }),
+        "apply" => Some(Type::Function { params: vec![
+            Type::QubitMap,
+            Type::UserDef("Transition".to_string())
+        ], return_type: Box::new(Type::QubitMap) }),
+        _ => None
     }
 }
-
-impl Default for KeywordTable {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 

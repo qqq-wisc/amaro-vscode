@@ -185,7 +185,7 @@ impl std::fmt::Display for ExprKind {
             ExprKind::Tuple(exprs) => f.write_str("Tuple"),
             ExprKind::StructLiteral { name, fields } => f.write_str("Struct"),
             ExprKind::FunctionCall { function, args } => f.write_str("Call"),
-            ExprKind::FieldAccess { object, field } => f.write_str("Field"),
+            ExprKind::FieldAccess { object, field } => f.write_str("FieldAccess"),
             ExprKind::IndexAccess { object, index } => f.write_str("Index"),
             ExprKind::Lambda { params, body } => f.write_str("Lambda"),
             ExprKind::IfThenElse { condition, then_branch, else_branch } => f.write_str("If-Then-Else"),

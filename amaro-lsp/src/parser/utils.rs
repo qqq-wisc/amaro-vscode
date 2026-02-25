@@ -105,6 +105,24 @@ pub fn smallest_expr_containing(file: &AmaroFile, position: Position) -> Result<
     }
 }
 
+/// Given an AmaroFile and a position, finds a field name at the given position,
+/// or None if it doesn't exist.
+pub fn field_name_containing(file: &AmaroFile, position: Position) -> Option<(String, Range)> {
+    // i know this looks kinda horrible.
+    // all this does is find a field (if one exists) which this position overlaps.
+    let found_field: Option<&crate::ast::Field> = file.blocks.iter().find_map(
+        |block| match &block.content {
+            crate::ast::BlockContent::Fields(block_items) => block_items,
+        }.iter().filter_map(|elt| match elt {
+            crate::ast::BlockItem::Field(f) => Some(f),
+            _ => None
+        }).find(|field| field.key_range.start <= position && field.key_range.end > position)
+    );
+
+    // map to our option
+    found_field.map(|field| (field.key.clone(), field.key_range))
+}
+
 /// In an expression, finds the smallest subexpression containing the goal position, or None if the goal position isn't even in the original expression.
 /// If the goal position is in the original expression, then something will always be returned.
 fn find_smallest_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Option<&'a Expr> {

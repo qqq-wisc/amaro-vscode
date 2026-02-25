@@ -1,8 +1,9 @@
 use super::symbols::*;
 use crate::ast::*;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Binary};
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionItemTag, Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range, Url
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionItemTag, Diagnostic,
+    DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range, Url,
 };
 
 /// Performs semantic analysis on a parsed Amaro file.
@@ -11,7 +12,6 @@ use tower_lsp::lsp_types::{
 /// Returns diagnostics for LSP clients.
 pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-
 
     let known_blocks = [
         "GateRealization",
@@ -162,28 +162,20 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-
-
-
 /// Aggregate of the args passed to infer_expr_type,
 /// so we can easily change these without having to change 10000 call signatures
 pub struct InferenceData<'a> {
     pub sym_table: &'a mut SymbolTable,
     pub diagnostics: &'a mut Vec<Diagnostic>,
     pub type_map: &'a mut HashMap<NodeId, Type>,
-    pub user_def_table: &'a UserDefTable
+    pub user_def_table: &'a UserDefTable,
 }
-
 
 /// Infers the type of an expression using the current symbol table.
 /// (Type Inference Engine)
 /// Recursively walks the AST and emits type errors for incompatibilities.
 /// Uses `Unknown` for leniency to avoid false positives.
-pub fn infer_expr_type(
-    expr: &Expr,
-    inference_data: &mut InferenceData
-) -> Type {
-
+pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type {
     let found_type = match &expr.kind {
         ExprKind::IntLiteral(_) => Type::Int,
         ExprKind::FloatLiteral(_) => Type::Float,
@@ -195,15 +187,25 @@ pub fn infer_expr_type(
                 return Type::Gate;
             }
 
-            inference_data.sym_table.lookup(name).cloned().unwrap_or_else(|| {
-                inference_data.diagnostics.push(Diagnostic {
-                    range: expr.range,
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    message: format!("Undefined variable '{}'.", name),
-                    ..Default::default()
-                });
-                Type::Unknown
-            })
+            inference_data
+                .sym_table
+                .lookup(name)
+                .cloned()
+                .unwrap_or_else(|| {
+                    // check for user defined type
+                    match inference_data.user_def_table.get_fields(name) {
+                        Some(_) => Type::UserDef(name.clone()),
+                        None => {
+                            inference_data.diagnostics.push(Diagnostic {
+                                range: expr.range,
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                message: format!("Undefined variable '{}'.", name),
+                                ..Default::default()
+                            });
+                            Type::Unknown
+                        }
+                    }
+                })
         }
         ExprKind::List(items) => {
             if items.is_empty() {
@@ -439,6 +441,17 @@ pub fn infer_expr_type(
                     },
                     _ => Type::Unknown,
                 },
+                Type::UserDef(name) => {
+                    // this means that we are indexing into a user-defined type
+                    // for instance, Transition.edge
+                    inference_data.user_def_table.get_fields(&name).map_or(
+                        Type::Unknown,
+                        |fields_map| match fields_map.get(field) {
+                            Some(t) => t.clone(),
+                            None => Type::Unknown,
+                        },
+                    )
+                }
                 Type::Unknown => Type::Unknown,
                 _ => Type::Unknown,
             }
@@ -517,121 +530,95 @@ pub fn infer_expr_type(
             let left_type = infer_expr_type(left, inference_data);
             let right_type = infer_expr_type(right, inference_data);
 
-            if left_type != right_type {
-                inference_data.diagnostics.push(Diagnostic {
-                    range: expr.range,
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    // TODO deal with auto-casting of Location
-                    message: "Currently, can only have a binary operation on two of the same types.".to_string(),
-                    ..Default::default()
-                });
-                return Type::Unknown
-            }
-
-            match left_type {
-                Type::Int | Type::Float => 
-                    match op {
-                        // same type as input
-                        BinaryOperator::Add
-                        | BinaryOperator::Sub
-                        | BinaryOperator::Div
-                        | BinaryOperator::Mul
-                        | BinaryOperator::Mod => left_type.clone(),
-
-                        BinaryOperator::Eq 
-                        | BinaryOperator::Ne
-                        | BinaryOperator::Lt
-                        | BinaryOperator::Le
-                        | BinaryOperator::Gt
-                        | BinaryOperator::Ge => Type::Bool,
-
-                        BinaryOperator::And
-                        | BinaryOperator::Or => {
-                            inference_data.diagnostics.push(Diagnostic {
-                                range: expr.range,
-                                severity: Some(DiagnosticSeverity::ERROR),
-                                message: format!("Cannot perform AND nor OR on the type {:?}.", left_type),
-                                ..Default::default()
-                            });
-                            Type::Unknown
-                        },
-                        BinaryOperator::Range => {
-                            inference_data.diagnostics.push(Diagnostic {
-                                range: expr.range,
-                                severity: Some(DiagnosticSeverity::ERROR),
-                                message: "Range behavior unknown.".to_string(), // TODO what should this be?
-                                ..Default::default()
-                            });
-                            Type::Unknown
-                        },
-                        BinaryOperator::Tensor => {
-                            inference_data.diagnostics.push(Diagnostic {
-                                range: expr.range,
-                                severity: Some(DiagnosticSeverity::ERROR),
-                                message: "Tensor behavior unknown.".to_string(), // TODO what should this be?
-                                ..Default::default()
-                            });
-                            Type::Unknown
-                        },
+            match op {
+                BinaryOperator::Add
+                | BinaryOperator::Sub
+                | BinaryOperator::Mul
+                | BinaryOperator::Div
+                | BinaryOperator::Mod => match types_math(&left_type, &right_type) {
+                    true => left_type.clone(), // TODO which type to use...?!
+                    false => {
+                        inference_data.diagnostics.push(Diagnostic {
+                            range: expr.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            // TODO deal with auto-casting of Location
+                            message: format!(
+                                "Cannot use math operations on types {} and {}.",
+                                left_type, right_type
+                            ),
+                            ..Default::default()
+                        });
+                        Type::Unknown
                     }
-                ,
-                Type::Bool => match op {
-                    BinaryOperator::Add
-                    | BinaryOperator::Sub
-                    | BinaryOperator::Div
-                    | BinaryOperator::Mul
-                    | BinaryOperator::Mod => {
+                },
+                BinaryOperator::Eq | BinaryOperator::Ne => {
+                    match types_comparable(&left_type, &right_type) {
+                        true => Type::Bool,
+                        false => {
+                            {
+                                inference_data.diagnostics.push(Diagnostic {
+                                    range: expr.range,
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    // TODO deal with auto-casting of Location
+                                    message: format!(
+                                        "Cannot use equality on types {} and {}.",
+                                        left_type, right_type
+                                    ),
+                                    ..Default::default()
+                                });
+                                Type::Unknown
+                            }
+                        }
+                    }
+                }
+                BinaryOperator::Lt
+                | BinaryOperator::Le
+                | BinaryOperator::Gt
+                | BinaryOperator::Ge => match types_math(&left_type, &right_type) {
+                    true => Type::Bool,
+                    false => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            message: "Cannot perform this operation on booleans.".to_string(),
+                            // TODO deal with auto-casting of Location
+                            message: format!(
+                                "Cannot use math comparison operations on types {} and {}.",
+                                left_type, right_type
+                            ),
                             ..Default::default()
                         });
                         Type::Unknown
-                    },
-                    BinaryOperator::Eq 
-                    | BinaryOperator::Ne
-                    | BinaryOperator::Lt
-                    | BinaryOperator::Le
-                    | BinaryOperator::Gt
-                    | BinaryOperator::Ge => Type::Bool,
+                    }
+                },
 
-                    BinaryOperator::And
-                    | BinaryOperator::Or => Type::Bool,
-
-                    BinaryOperator::Range => {
+                BinaryOperator::And | BinaryOperator::Or => match (&left_type, &right_type) {
+                    (Type::Bool, Type::Bool) => Type::Bool,
+                    (_, _) => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            message: "Range behavior unknown.".to_string(), // TODO what should this be?
+                            // TODO deal with auto-casting of Location
+                            message: format!(
+                                "Cannot use logical operations on types {} and {}.",
+                                left_type, right_type
+                            ),
                             ..Default::default()
                         });
                         Type::Unknown
-                    },
-                    BinaryOperator::Tensor => {
-                        inference_data.diagnostics.push(Diagnostic {
-                            range: expr.range,
-                            severity: Some(DiagnosticSeverity::ERROR),
-                            message: "Tensor behavior unknown.".to_string(), // TODO what should this be?
-                            ..Default::default()
-                        });
-                        Type::Unknown
-                    },
+                    }
                 },
                 _ => {
                     inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,
                         severity: Some(DiagnosticSeverity::ERROR),
-                        // TODO is this really all of them? Surely other types may participate.
-                        message: format!("Type '{:?}' is undefined for participating in binary operations.", left_type),
+                        // TODO deal with auto-casting of Location
+                        message: format!("Operator {:?} not yet implemented.", op),
                         ..Default::default()
                     });
-
                     Type::Unknown
-
                 }
             }
-        },
+        }
         ExprKind::UnaryOp { op, operand } => {
             let operand_type = infer_expr_type(operand, inference_data);
             match op {
@@ -647,7 +634,6 @@ pub fn infer_expr_type(
                         });
                         Type::Unknown
                     }
-                    
                 },
                 UnaryOperator::Neg => match operand_type {
                     Type::Int => Type::Int,
@@ -662,50 +648,70 @@ pub fn infer_expr_type(
                         });
                         Type::Unknown
                     }
-                    
                 },
             }
-        },
+        }
         ExprKind::TensorProduct { left, right } => todo!(), // TODO what to do here?
         ExprKind::Projection { index, tuple } => {
-            match &tuple.kind {
-                ExprKind::Tuple(exprs) => {
-                    match exprs.get(*index) {
-                        Some(found_expr) => {
-                            infer_expr_type(found_expr, inference_data)
-                        },
+            // first, get type of the tuple
+            let tuple_type = infer_expr_type(tuple, inference_data);
+            match tuple_type {
+                Type::Tuple(types) => {
+                    match types.get(*index) {
+                        Some(found_type) => found_type.clone(),
                         None => {
                             inference_data.diagnostics.push(Diagnostic {
                                 range: expr.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 // TODO is this really all of them? Surely other types may participate.
-                                message: "Index of projection was out-of-bounds for the tuple.".to_string(),
+                                message: "Index of projection was out-of-bounds for the tuple."
+                                    .to_string(),
                                 ..Default::default()
                             });
                             Type::Unknown
                         }
                     }
-                },
+                }
                 _ => {
                     inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,
                         severity: Some(DiagnosticSeverity::ERROR),
                         // TODO is this really all of them? Surely other types may participate.
-                        message: "Cannot perform projection on non-tuple.".to_string(),
+                        message: format!("Cannot perform projection on type {}", tuple_type),
                         ..Default::default()
                     });
                     Type::Unknown
                 }
             }
-
-            
-        },
-        _ => Type::Unknown
+        }
+        _ => Type::Unknown,
     };
     inference_data.type_map.insert(expr.id, found_type.clone());
 
     found_type
+}
 
+/// Comparisons are things like == or !=
+/// Unknown is treated generously to avoid cascading errors.
+fn types_comparable(t1: &Type, t2: &Type) -> bool {
+    if types_math(t1, t2) {
+        // math types treated all as just numbers
+        true
+    } else {
+        types_compatible(t1, t2)
+    }
+}
+
+// Math matching means that we can use >, <, +, -, etc.
+// Unknown is treated generously to avoid cascading errors.
+fn types_math(t1: &Type, t2: &Type) -> bool {
+    match t1 {
+        Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown => match t2 {
+            Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown => true,
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 /// Checks if two types are compatible for assignment or comparison.
@@ -769,9 +775,6 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
     }
 }
 
-
-
-
 pub struct Suggestion {
     pub completion_text: String,
     pub completion_type: Type,
@@ -807,10 +810,10 @@ impl Suggestion {
                 Type::Vec(..) => Some(": Array".to_string()),
                 Type::Tuple(..) => Some(": Tuple".to_string()),
                 Type::Function { .. } => Some(": Function".to_string()),
-                Type::Struct {..} => Some(": Struct".to_string()),
-                _ => None
+                Type::Struct { .. } => Some(": Struct".to_string()),
+                _ => None,
             },
-            description: Some(format!("{}", self.completion_type))
+            description: Some(format!("{}", self.completion_type)),
         }
     }
 
@@ -819,25 +822,25 @@ impl Suggestion {
     }
 
     pub fn to_completion_item(&self) -> CompletionItem {
-        CompletionItem { 
-            label: self.completion_text.clone(), 
-            label_details: Some(self.get_completion_item_label_details()), 
-            kind: Some(self.get_completion_item_kind()), 
-            detail: Some(self.get_completion_item_detail()), 
-            documentation: None, 
-            deprecated: Some(false), 
-            preselect: Some(false), 
+        CompletionItem {
+            label: self.completion_text.clone(),
+            label_details: Some(self.get_completion_item_label_details()),
+            kind: Some(self.get_completion_item_kind()),
+            detail: Some(self.get_completion_item_detail()),
+            documentation: None,
+            deprecated: Some(false),
+            preselect: Some(false),
             sort_text: None,
-            filter_text: None, 
+            filter_text: None,
             insert_text: None,
-            insert_text_format: None, 
-            insert_text_mode: None, 
-            text_edit: None, 
-            additional_text_edits: None, 
-            command: None, 
-            commit_characters: None, 
-            data: None, 
-            tags: None 
+            insert_text_format: None,
+            insert_text_mode: None,
+            text_edit: None,
+            additional_text_edits: None,
+            command: None,
+            commit_characters: None,
+            data: None,
+            tags: None,
         }
     }
 }
@@ -846,64 +849,61 @@ impl Suggestion {
 /// This would be what comes after the '.'
 pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Option<Vec<Suggestion>> {
     match t1 {
-        Type::Int
-        | Type::Float
-        | Type::Bool => None,
-        Type::String => None, // not sure
+        Type::Int | Type::Float | Type::Bool => None,
+        Type::String => None,   // not sure
         Type::Location => None, // not sure
-        Type::Qubit => None, // not sure
+        Type::Qubit => None,    // not sure
         Type::QubitMap => None, // not sure
         Type::Gate => Some(vec![
-                Suggestion {
-                    completion_text: "qubits".to_string(),
-                    completion_type: Type::Vec(Box::new(Type::Qubit))
+            Suggestion {
+                completion_text: "qubits".to_string(),
+                completion_type: Type::Vec(Box::new(Type::Qubit)),
+            },
+            Suggestion {
+                completion_text: "gate_type".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::Gate),
                 },
-                Suggestion {
-                    completion_text: "gate_type".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Gate),
-                    }
+            },
+            Suggestion {
+                completion_text: "implementation".to_string(),
+                completion_type: Type::Unknown,
+            },
+            Suggestion {
+                completion_text: "x_indices".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
                 },
-                Suggestion {
-                    completion_text: "implementation".to_string(),
-                    completion_type: Type::Unknown
+            },
+            Suggestion {
+                completion_text: "y_indices".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
                 },
-                Suggestion {
-                    completion_text: "x_indices".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
-                    },
+            },
+            Suggestion {
+                completion_text: "z_indices".to_string(),
+                completion_type: Type::Function {
+                    params: vec![],
+                    return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
                 },
-                Suggestion {
-                    completion_text: "y_indices".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
-                    },
-                },
-                Suggestion {
-                    completion_text: "z_indices".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
-                    },
-                }
-                
-            ]),
+            },
+        ]),
         Type::ArchT => Some(vec![
             Suggestion {
                 completion_text: "width".to_string(),
-                completion_type: Type::Int
+                completion_type: Type::Int,
             },
             Suggestion {
                 completion_text: "height".to_string(),
-                completion_type: Type::Int
+                completion_type: Type::Int,
             },
             Suggestion {
                 completion_text: "stack_size".to_string(),
-                completion_type: Type::Int
+                completion_type: Type::Int,
             },
             Suggestion {
                 completion_text: "edges".to_string(),
@@ -913,35 +913,32 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
                         Type::Location,
                         Type::Location,
                     ])))),
-                }
+                },
             },
             Suggestion {
                 completion_text: "succ_rates".to_string(),
-                completion_type: Type::Vec(Box::new(Type::Vec(Box::new(Type::Float))))
+                completion_type: Type::Vec(Box::new(Type::Vec(Box::new(Type::Float)))),
             },
-
             Suggestion {
                 completion_text: "contains_edge".to_string(),
                 completion_type: Type::Function {
                     params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
                     return_type: Box::new(Type::Bool),
-                }
+                },
             },
-
             Suggestion {
                 completion_text: "magic_state_qubits".to_string(),
                 completion_type: Type::Function {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-                }
+                },
             },
-
             Suggestion {
                 completion_text: "alg_qubits".to_string(),
                 completion_type: Type::Function {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-                }
+                },
             },
         ]),
         Type::StateT => Some(vec![
@@ -950,92 +947,112 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
                 completion_type: Type::Function {
                     params: vec![],
                     return_type: Box::new(Type::QubitMap),
-                }
+                },
             },
             Suggestion {
                 completion_text: "gates".to_string(),
                 completion_type: Type::Function {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Gate))),
-                }
+                },
             },
             Suggestion {
                 completion_text: "implemented_gates".to_string(),
-                completion_type: Type::Unknown
-            }
+                completion_type: Type::Unknown,
+            },
         ]),
         Type::InstrT => None, // not sure
         Type::Vec(inner) => Some(vec![
             Suggestion {
                 completion_text: "push".to_string(),
                 completion_type: Type::Function {
-                            params: vec![*inner.clone()],
-                            return_type: Box::new(Type::Vec(inner.clone())),
-                        },
+                    params: vec![*inner.clone()],
+                    return_type: Box::new(Type::Vec(inner.clone())),
+                },
             },
             Suggestion {
                 completion_text: "pop".to_string(),
                 completion_type: Type::Function {
-                            params: vec![],
-                            return_type: Box::new(Type::Option(inner.clone())),
-                        }
+                    params: vec![],
+                    return_type: Box::new(Type::Option(inner.clone())),
+                },
             },
             Suggestion {
                 completion_text: "extend".to_string(),
                 completion_type: Type::Function {
-                            params: vec![Type::Vec(inner.clone())],
-                            return_type: Box::new(Type::Vec(inner.clone())),
-                        }
-            }
-            ,
+                    params: vec![Type::Vec(inner.clone())],
+                    return_type: Box::new(Type::Vec(inner.clone())),
+                },
+            },
             Suggestion {
                 completion_text: "is_empty".to_string(),
                 completion_type: Type::Function {
-                            params: vec![],
-                            return_type: Box::new(Type::Bool),
-                        }
-            }
-            ,
+                    params: vec![],
+                    return_type: Box::new(Type::Bool),
+                },
+            },
             Suggestion {
                 completion_text: "contains".to_string(),
                 completion_type: Type::Function {
-                            params: vec![*inner.clone()],
-                            return_type: Box::new(Type::Bool),
-                        }
-            }
-            ,
+                    params: vec![*inner.clone()],
+                    return_type: Box::new(Type::Bool),
+                },
+            },
             Suggestion {
                 completion_text: "len".to_string(),
-                completion_type: Type::Int
-            }
+                completion_type: Type::Int,
+            },
         ]),
         Type::Tuple(items) => {
             // show autocomplete for each item
             if items.len() == 0 {
                 None
             } else {
-                Some(items.iter().enumerate()
-                    .map(
-                        |(index, item)| Suggestion {
+                Some(
+                    items
+                        .iter()
+                        .enumerate()
+                        .map(|(index, item)| Suggestion {
                             completion_text: format!("{}", index),
-                            completion_type: item.clone()})
-                    .collect())
+                            completion_type: item.clone(),
+                        })
+                        .collect(),
+                )
             }
-        },
-        Type::Option(nested) => Some(vec![
-            Suggestion { // TODO to be clear, I don't know that this is what we want.
+        }
+        Type::Option(nested) => Some(vec![Suggestion {
+            // TODO to be clear, I don't know that this is what we want.
             // I'm assuming we want an unwrap for options.
             // What else hould options have?
-                completion_text: "unwrap".to_string(),
-                completion_type: Type::Function { params: vec![], return_type: nested.clone() }
-            }
-        ]),
-        Type::Function { params, return_type } => None, // no suggestions for .
-        Type::Struct { fields, .. } => {
-            Some(fields.iter().map(|entry| Suggestion{completion_text: entry.0.clone(), completion_type: entry.1.clone()}).collect())
-        },
+            completion_text: "unwrap".to_string(),
+            completion_type: Type::Function {
+                params: vec![],
+                return_type: nested.clone(),
+            },
+        }]),
+        Type::Function {
+            params,
+            return_type,
+        } => None, // no suggestions for .
+        Type::Struct { fields, .. } => Some(
+            fields
+                .iter()
+                .map(|entry| Suggestion {
+                    completion_text: entry.0.clone(),
+                    completion_type: entry.1.clone(),
+                })
+                .collect(),
+        ),
         Type::UserDef(name) => {
-            user_def_table.get_fields(name).map(|hashmap| hashmap.iter().map(|entry| Suggestion{completion_text: entry.0.clone(), completion_type: entry.1.clone()}).collect()) // TODO
+            user_def_table.get_fields(name).map(|hashmap| {
+                hashmap
+                    .iter()
+                    .map(|entry| Suggestion {
+                        completion_text: entry.0.clone(),
+                        completion_type: entry.1.clone(),
+                    })
+                    .collect()
+            }) // TODO
         }
         Type::Unknown => None,
     }

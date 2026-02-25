@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
-use crate::parser::symbols::{SymbolTable, Type, UserDefTable};
+use crate::parser::symbols::{self, SymbolTable, Type, UserDefTable};
 use crate::parser::{InferenceData, check_semantics, infer_expr_type, parse_file, semantics, utils};
 
 #[derive(Debug)]
@@ -659,7 +659,38 @@ impl LanguageServer for Backend {
         };
 
         // TODO make hover work for more than just expressions
-        // TODO the range is messed up for functions. starts at 0,0
+
+        // first, check field names.
+        let hovered_field = utils::field_name_containing(&amaro_file, orig_pos);
+
+        if let Some((field_name, field_range)) = hovered_field {
+            // need to lookup the name
+            if let Some(field_type) = symbols::field_lookup(&field_name) {
+                return Ok(Some(Hover { 
+                    contents: HoverContents::Markup(
+                        MarkupContent { 
+                            kind: MarkupKind::PlainText, 
+                            value: format!("{}", field_type) }
+                    ), 
+                    range: Some(field_range)
+                }))
+            } else {
+                // we are done. if we are hovered over a field but we don't
+                // have an entry, then there's nothing to show...
+                // TODO maybe change this, so it shows a question mark or some
+                // indication that we DID receive the hover, we  just dont know
+                // what we're supposed to do with it...
+                return Ok(Some(Hover { 
+                    contents: HoverContents::Markup(
+                        MarkupContent { 
+                            kind: MarkupKind::PlainText, 
+                            value: format!("{}\nUnrecognized field!", field_name) }
+                    ), 
+                    range: Some(field_range)
+                }))
+            }
+            
+        }
 
         // find the largest expression containing this position before the dot
         let containing_expr = utils::smallest_expr_containing(&amaro_file, orig_pos);
@@ -698,6 +729,15 @@ impl LanguageServer for Backend {
                     Some(t) => t,
                     None => return Err(Error::new(ErrorCode::InternalError)),
                 };
+
+                if let Type::UserDef(n) = found_type {
+                    self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("USER DEFINED TYPE {}",n),
+                    )
+                    .await;
+                }
 
                 Ok(Some(Hover { 
                     contents: HoverContents::Markup(
