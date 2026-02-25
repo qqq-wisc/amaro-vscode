@@ -1,5 +1,7 @@
 use std::{collections::HashMap, fmt::Write};
 
+use crate::parser::utils;
+
 /// The type system for Amaro expressions.
 ///
 /// Represents all possible types that can appear in the language, including
@@ -34,6 +36,8 @@ pub enum Type {
         params: Vec<Type>,
         return_type: Box<Type>,
     },
+
+    UserDef(String),
 
     // Struct types
     Struct {
@@ -87,6 +91,7 @@ impl std::fmt::Display for Type {
                 f.write_str(") -> ")?;
                 return_type.fmt(f)
             },
+            Type::UserDef(name) => f.write_str(name),
             Type::Struct { name, fields } => f.write_str(name),
             Type::Unknown => f.write_char('?'),
         }
@@ -100,6 +105,46 @@ impl std::fmt::Display for Type {
 pub struct SymbolTable {
     // bindings: HashMap<String, Type>,
     scopes: Vec<HashMap<String, Type>>,
+}
+
+/// There are user-defined types, like Transition.
+/// We need to have ONE place where we store these types.
+/// Then, we can reference these types from here by name.
+pub struct UserDefTable {
+    /// maps from type names (like Transition) to their fields
+    map: HashMap<String, UserDefEntry>
+}
+
+struct UserDefEntry {
+    fields: HashMap<String, Type>
+}
+
+impl UserDefTable {
+    /// Given an AmaroFile, creates a UserDefTable which determines the fields 
+    /// of user-defined types
+    pub fn new(file: &crate::ast::AmaroFile) -> Self {
+        // TODO what if there are errors? need diagnostics?
+        let mut map: HashMap<String, UserDefEntry> = HashMap::new();
+
+        for block in &file.blocks {
+            let items = match &block.content {
+                crate::ast::BlockContent::Fields(block_items) => block_items,
+            };
+            items.iter().filter_map(|elt| match elt {
+                crate::ast::BlockItem::Field(_) => None,
+                crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
+            }).for_each(|struct_def| {
+                let fields = struct_def.fields.iter().map(|elt| (elt.name.clone(), utils::type_annotation_to_type(&elt.type_annotation))).collect();
+                map.insert(struct_def.name.clone(), UserDefEntry { fields: fields });
+            })
+        }
+
+        UserDefTable { map }
+    }
+
+    pub fn get_fields(&self, identifier: &str) -> Option<&HashMap<String, Type>> {
+        self.map.get(identifier).map(|elt| &elt.fields)
+    }
 }
 
 impl SymbolTable {
@@ -154,17 +199,19 @@ impl SymbolTable {
         scope.insert("step".to_string(), Type::Int);
         scope.insert(
             "Transition".to_string(),
-            Type::Struct {
-                name: "Transition".to_string(),
-                fields: HashMap::new(),
-            },
+            Type::UserDef("Transition".to_string())
+            // Type::Struct {
+            //     name: "Transition".to_string(),
+            //     fields: HashMap::new(),
+            // },
         );
         scope.insert(
             "GateRealization".to_string(),
-            Type::Struct {
-                name: "GateRealization".to_string(),
-                fields: HashMap::new(),
-            },
+            Type::UserDef("GateRealization".to_string())
+            // Type::Struct {
+            //     name: "GateRealization".to_string(),
+            //     fields: HashMap::new(),
+            // },
         );
     }
 
@@ -334,6 +381,48 @@ impl SymbolTable {
 }
 
 impl Default for SymbolTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// For built-in keywords. Identifies the expected type.
+/// For instance, the cost function has an expected type.
+pub struct KeywordTable {
+    /// maps from function names to their signatures
+    functions: HashMap<String, KeywordInfo>
+}
+
+pub struct KeywordInfo {
+    typ: Type,
+    description: String
+}
+
+
+
+impl KeywordTable {
+    /// Makes a KeywordTable with all the built-in signatures
+    pub fn new() -> Self {
+
+        let mut functions: HashMap<String, KeywordInfo> = HashMap::new();
+
+        // do the functions
+        // hmm.. i dont actually know the types of many of them
+
+        // TODO is this the correct signature for cost?
+        functions.insert(
+            "cost".to_string(), 
+
+            KeywordInfo { typ: Type::Function { params: vec![Type::UserDef("Transition".to_string())], return_type: Box::new(Type::Float) }
+            , description: "Explanation for cost function.\nFunction which determines cost of transitions.".to_string() }
+            
+            );
+        
+        KeywordTable { functions: functions }
+    }
+}
+
+impl Default for KeywordTable {
     fn default() -> Self {
         Self::new()
     }

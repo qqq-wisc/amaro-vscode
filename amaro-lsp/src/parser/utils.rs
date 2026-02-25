@@ -1,8 +1,10 @@
 use tower_lsp::lsp_types::{Position, Range};
 
+use crate::ast::TypeAnnotation;
 use crate::ast::AmaroFile;
 use crate::ast::Expr;
 use crate::ast::ExprKind;
+use crate::parser::symbols::Type;
 
 pub fn calc_range(full_text: &str, start_offset: usize, length: usize) -> Range {
     let abs_start = start_offset;
@@ -91,6 +93,75 @@ pub fn largest_expr_containing(file: &AmaroFile, position: Position) -> Result<&
         )
 }
 
+/// Given an AmaroFile and a position, extracts the smallests expression which
+/// contains the position, or errors if none found.
+pub fn smallest_expr_containing(file: &AmaroFile, position: Position) -> Result<&Expr, String> {
+    // first, get largest expression
+    let largest_expr = largest_expr_containing(file, position)?;
+    // then, descend until cannot
+    match find_smallest_subexpr(largest_expr, position) {
+        None => Err("Something went wrong. The position is actually not in any expression. Should fix this case.".to_string()),
+        Some(i) => Ok(i)
+    }
+}
+
+/// In an expression, finds the smallest subexpression containing the goal position, or None if the goal position isn't even in the original expression.
+/// If the goal position is in the original expression, then something will always be returned.
+fn find_smallest_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Option<&'a Expr> {
+    if goal_position >= expr.range.end || goal_position < expr.range.start {
+        None
+    } else {
+        match &expr.kind {
+            ExprKind::List(exprs) => exprs
+                .iter()
+                .find_map(|elt| find_smallest_subexpr(elt, goal_position)),
+            ExprKind::Tuple(exprs) => exprs
+                .iter()
+                .find_map(|elt| find_smallest_subexpr(elt, goal_position)),
+            ExprKind::StructLiteral { fields, .. } => fields
+                .iter()
+                .find_map(|elt| find_smallest_subexpr(&elt.1, goal_position)),
+            ExprKind::FunctionCall { function, args } => {
+                find_smallest_subexpr(function, goal_position).or(args
+                    .iter()
+                    .find_map(|elt| find_smallest_subexpr(elt, goal_position)))
+            }
+            ExprKind::FieldAccess { object, .. } => find_smallest_subexpr(object, goal_position),
+            ExprKind::IndexAccess { object, index } => {
+                find_smallest_subexpr(object, goal_position)
+                    .or(find_smallest_subexpr(index, goal_position))
+            }
+            ExprKind::Lambda { body, .. } => find_smallest_subexpr(body, goal_position),
+            ExprKind::IfThenElse {
+                condition,
+                then_branch,
+                else_branch,
+            } => find_smallest_subexpr(condition, goal_position)
+                .or(find_smallest_subexpr(then_branch, goal_position))
+                .or(find_smallest_subexpr(else_branch, goal_position)),
+            ExprKind::LetBinding { value, body, .. } => {
+                find_smallest_subexpr(value, goal_position)
+                    .or(find_smallest_subexpr(body, goal_position))
+            }
+            ExprKind::BinaryOp { left, right, .. } => find_smallest_subexpr(left, goal_position)
+                .or(find_smallest_subexpr(right, goal_position)),
+            ExprKind::UnaryOp { operand, .. } => find_smallest_subexpr(operand, goal_position),
+            ExprKind::Some(in_expr) => find_smallest_subexpr(in_expr, goal_position),
+            ExprKind::TensorProduct { left, right } => {
+                if let Some(v) = find_smallest_subexpr(left, goal_position) {
+                    Some(v)
+                } else {
+                    find_smallest_subexpr(right, goal_position)
+                }
+            }
+            ExprKind::Projection { tuple, .. } => find_smallest_subexpr(&tuple, goal_position),
+            _ => None,
+        }.or(Some(expr))
+    }
+}
+
+
+
 /// Given an expression, determines if its range ends at the provided goal
 /// position, then recursively explores any child expressions.
 /// ## Returns
@@ -150,5 +221,42 @@ pub fn find_finishing_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Op
             ExprKind::Projection { tuple, .. } => find_finishing_subexpr(&tuple, goal_position),
             _ => None,
         }
+    }
+}
+
+
+pub fn type_annotation_to_type(type_annotation: &TypeAnnotation) -> Type {
+    match type_annotation {
+        TypeAnnotation::Simple(name) => match name.as_str() {
+            "Int" => Type::Int,
+            "Float" => Type::Float,
+            "Bool" => Type::Bool,
+            "String" => Type::String,
+            "Location" => Type::Location,
+            "Arch" => Type::ArchT,
+            "Gate" => Type::Gate,
+            "Instr" => Type::InstrT, // TODO this right?
+            "Qubit" => Type::Qubit,
+            "QubitMap" => Type::QubitMap,
+            "State" => Type::StateT,
+            // if none of the built-in types, then assume it is a type defined
+            // by the user. could also be garbage
+            el => Type::UserDef(el.to_string())
+        },
+        TypeAnnotation::Generic(name, type_annotations) => match name.as_str() {
+            "Vec" => if type_annotations.len() != 1 {
+                Type::Unknown
+            } else {
+                Type::Vec(Box::new(type_annotation_to_type(&type_annotations[0])))
+            },
+            "Option" => if type_annotations.len() != 1 {
+                Type::Unknown
+            } else {
+                Type::Option(Box::new(type_annotation_to_type(&type_annotations[0])))
+            },
+            _ => Type::Unknown
+        },
+        TypeAnnotation::Tuple(type_annotations) => Type::Tuple(type_annotations.iter().map(|elt| type_annotation_to_type(elt)).collect()),
+        TypeAnnotation::Function { params, return_type } => Type::Function { params: params.iter().map(|elt| type_annotation_to_type(elt)).collect(), return_type: Box::new(type_annotation_to_type(return_type)) },
     }
 }

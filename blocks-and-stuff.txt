@@ -1,0 +1,42 @@
+TransitionBlock (TransitionInfo)
+	pub data: NamedTuple
+	pub apply: Expr
+		step<CustomRealization> -> step<CustomRealization>
+	pub cost: Expr
+		Transition -> f64
+	pub get_transitions: Expr
+		(Arch, State) -> List[Transition]
+	
+ArchitectureBlock
+	pub data: NamedTuple
+	pub get_locations: Option<Expr>
+
+StepBlock
+	pub cost: Expr
+		step<CustomRealization>, arch -> f64
+	
+ImplBlock (RouteInfo)
+	pub routed_gates: Vec<GateType>
+	pub data: NamedTuple
+	
+	pub realize_gate: Expr
+		(Arch, State, Gate) -> List[GateRealization]
+
+ProblemDefinition
+	pub imp: ImplBlock
+	pub trans: TransitionBlock
+	pub arch: Option<ArchitectureBlock>
+	pub step: Option<StepBlock>
+	
+NamedTuple
+	pub name: String,
+	pub fields: Vec<(String, Ty)>
+	
+Ty
+	LocationTy,
+	IntTy,
+	FloatTy,
+	TupleTy
+	VectorTy
+	
+realize_gate: step, arch, gate -> Vec<CustomRealization>???

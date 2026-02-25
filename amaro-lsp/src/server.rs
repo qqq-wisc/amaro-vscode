@@ -6,8 +6,8 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
-use crate::parser::symbols::{SymbolTable, Type};
-use crate::parser::{check_semantics, infer_expr_type, parse_file, semantics, utils};
+use crate::parser::symbols::{SymbolTable, Type, UserDefTable};
+use crate::parser::{InferenceData, check_semantics, infer_expr_type, parse_file, semantics, utils};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -401,6 +401,8 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
 
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+
                 ..Default::default()
             },
             ..Default::default()
@@ -474,9 +476,7 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    /// runs when '.' is typed.
-    /// TODO why is this running on every character??
-    /// TODO fix up the thing where lists have a trailing , 
+    // triggers autocomplete
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         // get the text doc
         let uri = params.text_document_position.text_document.uri;
@@ -551,12 +551,23 @@ impl LanguageServer for Backend {
                         format!("\tFound expression {} containing position.", e.kind),
                     )
                     .await;
+
+                // first, get user-defined structs
+                let user_def_table = UserDefTable::new(&amaro_file);
+
                 let mut sym_table = SymbolTable::new();
                 let mut type_map: HashMap<NodeId, Type> = HashMap::new();
                 let mut diags: Vec<Diagnostic> = Vec::new();
 
+                let mut inf_data = InferenceData { 
+                    sym_table: &mut sym_table, 
+                    diagnostics: &mut diags, 
+                    type_map: &mut type_map, 
+                    user_def_table: &user_def_table
+                };
+
                 // explore the expr
-                infer_expr_type(e, &mut sym_table, &mut diags, &mut type_map);
+                infer_expr_type(e, &mut inf_data);
 
                 // now, need to find the expr right before our cursor, and get
                 // the type of that one.
@@ -587,7 +598,7 @@ impl LanguageServer for Backend {
 
                         
 
-                        match semantics::suggest_next_from_type(&found_type) {
+                        match semantics::suggest_next_from_type(&found_type, &user_def_table) {
                             Some(suggestions) => Ok(Some(CompletionResponse::Array(
                                 suggestions
                                     .iter()
@@ -615,6 +626,95 @@ impl LanguageServer for Backend {
                     .log_message(
                         MessageType::INFO,
                         "\tNo expression found containg the position.".to_string(),
+                    )
+                    .await;
+                Ok(None) //
+            },
+        }
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        // TODO make this more efficient.
+        // right now, we only cache the text and not the expressions & stuff.
+        // this is a lot of repeated work if the user changes hover often
+
+        // get the text doc
+        let uri = params.text_document_position_params.text_document.uri;
+        let guard = self.documents.read().await;
+        let file_content = guard.get(&uri);
+
+        if let None = file_content {
+            return Err(Error::new(ErrorCode::InvalidRequest));
+        }
+
+        let string_content = file_content.unwrap();
+
+        // get original position of cursor. this is after the dot.
+        let orig_pos = params.text_document_position_params.position;
+
+        // parse the file into expressions
+        let amaro_file = match parse_file(string_content) {
+            Ok(f) => f,
+            Err(_) => return Err(Error::new(ErrorCode::ParseError)),
+        };
+
+        // TODO make hover work for more than just expressions
+        // TODO the range is messed up for functions. starts at 0,0
+
+        // find the largest expression containing this position before the dot
+        let containing_expr = utils::smallest_expr_containing(&amaro_file, orig_pos);
+
+        match containing_expr {
+            // if we had an expression containing our goal pos...
+            Ok(e) => {
+
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("\tFound expression {} containing position.", e.kind),
+                    )
+                    .await;
+
+                // first, get user-defined structs
+                let user_def_table = UserDefTable::new(&amaro_file);
+
+                let mut sym_table = SymbolTable::new();
+                let mut type_map: HashMap<NodeId, Type> = HashMap::new();
+                let mut diags: Vec<Diagnostic> = Vec::new();
+
+                let mut inf_data = InferenceData { 
+                    sym_table: &mut sym_table, 
+                    diagnostics: &mut diags, 
+                    type_map: &mut type_map, 
+                    user_def_table: &user_def_table
+                };
+
+                // explore the expr
+                infer_expr_type(e, &mut inf_data);
+                
+                // TODO later, find smallest expression
+
+                let found_type = match type_map.get(&e.id) {
+                    Some(t) => t,
+                    None => return Err(Error::new(ErrorCode::InternalError)),
+                };
+
+                Ok(Some(Hover { 
+                    contents: HoverContents::Markup(
+                        MarkupContent { 
+                            kind: MarkupKind::PlainText, 
+                            value: format!("{}", found_type) }
+                    ), 
+                    range: Some(e.range)
+                }))
+                
+            }
+            // if we lacked an expression containing our goal pos...
+            Err(_) => {
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        "\tNo expression found containing the position.".to_string(),
                     )
                     .await;
                 Ok(None) //

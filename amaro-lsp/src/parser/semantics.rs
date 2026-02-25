@@ -33,6 +33,8 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
 
     let mut found_blocks: HashMap<String, Range> = HashMap::new();
 
+    let user_def_table = UserDefTable::new(file);
+
     // Block Level Validation
     for block in &file.blocks {
         let block_name = block.kind.as_str();
@@ -83,7 +85,14 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
         for item in items {
             if let BlockItem::Field(field) = item {
                 present_keys.push(field.key.as_str());
-                infer_expr_type(&field.value, &mut sym_table, &mut diagnostics, &mut type_map);
+
+                let mut inf_data = InferenceData {
+                    sym_table: &mut sym_table,
+                    diagnostics: &mut diagnostics,
+                    type_map: &mut type_map,
+                    user_def_table: &user_def_table,
+                };
+                infer_expr_type(&field.value, &mut inf_data);
 
                 // 3.1. Gate Validation in 'routed_gates' fields
                 if block_name == "RouteInfo" && field.key == "routed_gates" {
@@ -154,16 +163,27 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 
+
+
+/// Aggregate of the args passed to infer_expr_type,
+/// so we can easily change these without having to change 10000 call signatures
+pub struct InferenceData<'a> {
+    pub sym_table: &'a mut SymbolTable,
+    pub diagnostics: &'a mut Vec<Diagnostic>,
+    pub type_map: &'a mut HashMap<NodeId, Type>,
+    pub user_def_table: &'a UserDefTable
+}
+
+
 /// Infers the type of an expression using the current symbol table.
 /// (Type Inference Engine)
 /// Recursively walks the AST and emits type errors for incompatibilities.
 /// Uses `Unknown` for leniency to avoid false positives.
 pub fn infer_expr_type(
     expr: &Expr,
-    sym_table: &mut SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-    type_map: &mut HashMap<NodeId, Type>
+    inference_data: &mut InferenceData
 ) -> Type {
+
     let found_type = match &expr.kind {
         ExprKind::IntLiteral(_) => Type::Int,
         ExprKind::FloatLiteral(_) => Type::Float,
@@ -175,8 +195,8 @@ pub fn infer_expr_type(
                 return Type::Gate;
             }
 
-            sym_table.lookup(name).cloned().unwrap_or_else(|| {
-                diagnostics.push(Diagnostic {
+            inference_data.sym_table.lookup(name).cloned().unwrap_or_else(|| {
+                inference_data.diagnostics.push(Diagnostic {
                     range: expr.range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     message: format!("Undefined variable '{}'.", name),
@@ -189,11 +209,11 @@ pub fn infer_expr_type(
             if items.is_empty() {
                 Type::Vec(Box::new(Type::Unknown))
             } else {
-                let first_type = infer_expr_type(&items[0], sym_table, diagnostics, type_map);
+                let first_type = infer_expr_type(&items[0], inference_data);
                 for item in &items[1..] {
-                    let item_type = infer_expr_type(item, sym_table, diagnostics, type_map);
+                    let item_type = infer_expr_type(item, inference_data);
                     if item_type != first_type {
-                        diagnostics.push(Diagnostic {
+                        inference_data.diagnostics.push(Diagnostic {
                             range: item.range,
                             severity: Some(DiagnosticSeverity::ERROR),
                             message: "Inconsistent types in list literal.".to_string(),
@@ -208,22 +228,22 @@ pub fn infer_expr_type(
         ExprKind::Tuple(items) => Type::Tuple(
             items
                 .iter()
-                .map(|e| infer_expr_type(e, sym_table, diagnostics, type_map))
+                .map(|e| infer_expr_type(e, inference_data))
                 .collect(),
         ),
         ExprKind::Some(inner) => {
-            let inner_type = infer_expr_type(inner, sym_table, diagnostics, type_map);
+            let inner_type = infer_expr_type(inner, inference_data);
             Type::Option(Box::new(inner_type))
         }
         ExprKind::Lambda { params, body } => {
-            sym_table.enter_scope();
+            inference_data.sym_table.enter_scope();
             let mut param_types = Vec::new();
             for param in params {
-                sym_table.bind(param.clone(), Type::Unknown);
+                inference_data.sym_table.bind(param.clone(), Type::Unknown);
                 param_types.push(Type::Unknown);
             }
-            let return_type = infer_expr_type(body, sym_table, diagnostics, type_map);
-            sym_table.exit_scope();
+            let return_type = infer_expr_type(body, inference_data);
+            inference_data.sym_table.exit_scope();
 
             Type::Function {
                 params: param_types,
@@ -231,11 +251,11 @@ pub fn infer_expr_type(
             }
         }
         ExprKind::LetBinding { name, value, body } => {
-            sym_table.enter_scope();
-            let value_type = infer_expr_type(value, sym_table, diagnostics, type_map);
-            sym_table.bind(name.clone(), value_type);
-            let body_type = infer_expr_type(body, sym_table, diagnostics, type_map);
-            sym_table.exit_scope();
+            inference_data.sym_table.enter_scope();
+            let value_type = infer_expr_type(value, inference_data);
+            inference_data.sym_table.bind(name.clone(), value_type);
+            let body_type = infer_expr_type(body, inference_data);
+            inference_data.sym_table.exit_scope();
             body_type
         }
         ExprKind::IfThenElse {
@@ -243,9 +263,9 @@ pub fn infer_expr_type(
             then_branch,
             else_branch,
         } => {
-            let cond_type = infer_expr_type(condition, sym_table, diagnostics, type_map);
+            let cond_type = infer_expr_type(condition, inference_data);
             if !types_compatible(&cond_type, &Type::Bool) {
-                diagnostics.push(Diagnostic {
+                inference_data.diagnostics.push(Diagnostic {
                     range: condition.range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     message: "Condition in if-then-else must be of type 'Bool'.".to_string(),
@@ -253,11 +273,11 @@ pub fn infer_expr_type(
                 });
             }
 
-            let then_type = infer_expr_type(then_branch, sym_table, diagnostics, type_map);
-            let else_type = infer_expr_type(else_branch, sym_table, diagnostics, type_map);
+            let then_type = infer_expr_type(then_branch, inference_data);
+            let else_type = infer_expr_type(else_branch, inference_data);
 
             if !types_compatible(&then_type, &else_type) {
-                diagnostics.push(Diagnostic {
+                inference_data.diagnostics.push(Diagnostic {
                     range: expr.range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     message: "Then and else branches of if-then-else must have compatible types."
@@ -268,14 +288,14 @@ pub fn infer_expr_type(
             then_type
         }
         ExprKind::FunctionCall { function, args } => {
-            let func_type = infer_expr_type(function, sym_table, diagnostics, type_map);
+            let func_type = infer_expr_type(function, inference_data);
             match func_type {
                 Type::Function {
                     params,
                     return_type,
                 } => {
                     if params.len() != args.len() {
-                        diagnostics.push(Diagnostic {
+                        inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
                             message: format!(
@@ -288,7 +308,7 @@ pub fn infer_expr_type(
                         return *return_type;
                     }
                     for (i, (param_type, arg)) in params.iter().zip(args).enumerate() {
-                        let arg_type = infer_expr_type(arg, sym_table, diagnostics, type_map);
+                        let arg_type = infer_expr_type(arg, inference_data);
 
                         // Following Logic
                         // 1. If param_type Unknown, Accept
@@ -298,7 +318,7 @@ pub fn infer_expr_type(
                             && arg_type != Type::Unknown
                             && !types_compatible(param_type, &arg_type)
                         {
-                            diagnostics.push(Diagnostic {
+                            inference_data.diagnostics.push(Diagnostic {
                                 range: arg.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 message: format!(
@@ -315,7 +335,7 @@ pub fn infer_expr_type(
                 }
                 Type::Unknown => Type::Unknown, // Avoid Cascading Errors
                 _ => {
-                    diagnostics.push(Diagnostic {
+                    inference_data.diagnostics.push(Diagnostic {
                         range: function.range,
                         severity: Some(DiagnosticSeverity::ERROR),
                         message: "Attempted to call a non-function value.".to_string(),
@@ -326,7 +346,7 @@ pub fn infer_expr_type(
             }
         }
         ExprKind::FieldAccess { object, field } => {
-            let obj_type = infer_expr_type(object, sym_table, diagnostics, type_map);
+            let obj_type = infer_expr_type(object, inference_data);
             match obj_type {
                 Type::Vec(inner) => {
                     if field == "push" {
@@ -360,7 +380,8 @@ pub fn infer_expr_type(
                         Type::Unknown
                     }
                 }
-                Type::Struct { fields, .. } => fields.get(field).cloned().unwrap_or(Type::Unknown),
+                // Type::UserDef(name) => inference_data.user_def_table // TODO
+                //Type::Struct { fields, .. } => fields.get(field).cloned().unwrap_or(Type::Unknown),
                 Type::Tuple(elements) => {
                     if let Ok(idx) = field.parse::<usize>() {
                         elements.get(idx).cloned().unwrap_or(Type::Unknown)
@@ -425,7 +446,7 @@ pub fn infer_expr_type(
         ExprKind::StructLiteral { name, fields } => {
             let mut field_types = HashMap::new();
             for (key, value) in fields {
-                let val_type = infer_expr_type(value, sym_table, diagnostics, type_map);
+                let val_type = infer_expr_type(value, inference_data);
                 field_types.insert(key.clone(), val_type);
             }
             Type::Struct {
@@ -434,8 +455,8 @@ pub fn infer_expr_type(
             }
         }
         ExprKind::IndexAccess { object, index } => {
-            let obj_type = infer_expr_type(object, sym_table, diagnostics, type_map);
-            let idx_type = infer_expr_type(index, sym_table, diagnostics, type_map);
+            let obj_type = infer_expr_type(object, inference_data);
+            let idx_type = infer_expr_type(index, inference_data);
 
             // Skip validation for Unknown types to avoid false positives.
             // Example: x.implementation.(path()) where x is Unknown.
@@ -457,7 +478,7 @@ pub fn infer_expr_type(
             };
 
             if idx_type != Type::Unknown && !types_compatible(&idx_type, &expected_idx_type) {
-                diagnostics.push(Diagnostic {
+                inference_data.diagnostics.push(Diagnostic {
                     range: index.range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     message: format!(
@@ -482,7 +503,7 @@ pub fn infer_expr_type(
                 Type::QubitMap => Type::Location,
                 Type::Unknown => Type::Unknown,
                 _ => {
-                    diagnostics.push(Diagnostic {
+                    inference_data.diagnostics.push(Diagnostic {
                         range: object.range,
                         severity: Some(DiagnosticSeverity::ERROR),
                         message: "Attempted to index a non-indexable type.".to_string(),
@@ -493,11 +514,11 @@ pub fn infer_expr_type(
             }
         }
         ExprKind::BinaryOp { op, left, right } => {
-            let left_type = infer_expr_type(left, sym_table, diagnostics, type_map);
-            let right_type = infer_expr_type(right, sym_table, diagnostics, type_map);
+            let left_type = infer_expr_type(left, inference_data);
+            let right_type = infer_expr_type(right, inference_data);
 
             if left_type != right_type {
-                diagnostics.push(Diagnostic {
+                inference_data.diagnostics.push(Diagnostic {
                     range: expr.range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     // TODO deal with auto-casting of Location
@@ -526,7 +547,7 @@ pub fn infer_expr_type(
 
                         BinaryOperator::And
                         | BinaryOperator::Or => {
-                            diagnostics.push(Diagnostic {
+                            inference_data.diagnostics.push(Diagnostic {
                                 range: expr.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 message: format!("Cannot perform AND nor OR on the type {:?}.", left_type),
@@ -535,7 +556,7 @@ pub fn infer_expr_type(
                             Type::Unknown
                         },
                         BinaryOperator::Range => {
-                            diagnostics.push(Diagnostic {
+                            inference_data.diagnostics.push(Diagnostic {
                                 range: expr.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 message: "Range behavior unknown.".to_string(), // TODO what should this be?
@@ -544,7 +565,7 @@ pub fn infer_expr_type(
                             Type::Unknown
                         },
                         BinaryOperator::Tensor => {
-                            diagnostics.push(Diagnostic {
+                            inference_data.diagnostics.push(Diagnostic {
                                 range: expr.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 message: "Tensor behavior unknown.".to_string(), // TODO what should this be?
@@ -560,7 +581,7 @@ pub fn infer_expr_type(
                     | BinaryOperator::Div
                     | BinaryOperator::Mul
                     | BinaryOperator::Mod => {
-                        diagnostics.push(Diagnostic {
+                        inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
                             message: "Cannot perform this operation on booleans.".to_string(),
@@ -579,7 +600,7 @@ pub fn infer_expr_type(
                     | BinaryOperator::Or => Type::Bool,
 
                     BinaryOperator::Range => {
-                        diagnostics.push(Diagnostic {
+                        inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
                             message: "Range behavior unknown.".to_string(), // TODO what should this be?
@@ -588,7 +609,7 @@ pub fn infer_expr_type(
                         Type::Unknown
                     },
                     BinaryOperator::Tensor => {
-                        diagnostics.push(Diagnostic {
+                        inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
                             message: "Tensor behavior unknown.".to_string(), // TODO what should this be?
@@ -598,7 +619,7 @@ pub fn infer_expr_type(
                     },
                 },
                 _ => {
-                    diagnostics.push(Diagnostic {
+                    inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,
                         severity: Some(DiagnosticSeverity::ERROR),
                         // TODO is this really all of them? Surely other types may participate.
@@ -612,12 +633,12 @@ pub fn infer_expr_type(
             }
         },
         ExprKind::UnaryOp { op, operand } => {
-            let operand_type = infer_expr_type(operand, sym_table, diagnostics, type_map);
+            let operand_type = infer_expr_type(operand, inference_data);
             match op {
                 UnaryOperator::Not => match operand_type {
                     Type::Bool => Type::Bool,
                     _ => {
-                        diagnostics.push(Diagnostic {
+                        inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
                             // TODO is this really all of them? Surely other types may participate.
@@ -632,7 +653,7 @@ pub fn infer_expr_type(
                     Type::Int => Type::Int,
                     Type::Float => Type::Float,
                     _ => {
-                        diagnostics.push(Diagnostic {
+                        inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
                             // TODO is this really all of them? Surely other types may participate.
@@ -651,10 +672,10 @@ pub fn infer_expr_type(
                 ExprKind::Tuple(exprs) => {
                     match exprs.get(*index) {
                         Some(found_expr) => {
-                            infer_expr_type(found_expr, sym_table, diagnostics, type_map)
+                            infer_expr_type(found_expr, inference_data)
                         },
                         None => {
-                            diagnostics.push(Diagnostic {
+                            inference_data.diagnostics.push(Diagnostic {
                                 range: expr.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 // TODO is this really all of them? Surely other types may participate.
@@ -666,7 +687,7 @@ pub fn infer_expr_type(
                     }
                 },
                 _ => {
-                    diagnostics.push(Diagnostic {
+                    inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,
                         severity: Some(DiagnosticSeverity::ERROR),
                         // TODO is this really all of them? Surely other types may participate.
@@ -681,7 +702,7 @@ pub fn infer_expr_type(
         },
         _ => Type::Unknown
     };
-    type_map.insert(expr.id, found_type.clone());
+    inference_data.type_map.insert(expr.id, found_type.clone());
 
     found_type
 
@@ -774,7 +795,8 @@ impl Suggestion {
             Type::Tuple(..) => CompletionItemKind::VARIABLE,
             Type::Option(..) => CompletionItemKind::ENUM,
             Type::Function { .. } => CompletionItemKind::FUNCTION,
-            Type::Struct { .. } => CompletionItemKind::STRUCT,
+            //Type::Struct { .. } => CompletionItemKind::STRUCT,
+            Type::UserDef(..) => CompletionItemKind::STRUCT,
             _ => CompletionItemKind::CONSTANT,
         }
     }
@@ -822,7 +844,7 @@ impl Suggestion {
 
 /// From a given type, identifies autocomplete suggestions.
 /// This would be what comes after the '.'
-pub fn suggest_next_from_type(t1: &Type) -> Option<Vec<Suggestion>> {
+pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Option<Vec<Suggestion>> {
     match t1 {
         Type::Int
         | Type::Float
@@ -1012,6 +1034,9 @@ pub fn suggest_next_from_type(t1: &Type) -> Option<Vec<Suggestion>> {
         Type::Struct { fields, .. } => {
             Some(fields.iter().map(|entry| Suggestion{completion_text: entry.0.clone(), completion_type: entry.1.clone()}).collect())
         },
+        Type::UserDef(name) => {
+            user_def_table.get_fields(name).map(|hashmap| hashmap.iter().map(|entry| Suggestion{completion_text: entry.0.clone(), completion_type: entry.1.clone()}).collect()) // TODO
+        }
         Type::Unknown => None,
     }
 }
