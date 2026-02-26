@@ -15,6 +15,13 @@ The LSP performs deep type inference and validation of your quantum routing logi
 * **Vector Operations:** Built-in support for standard vector methods (`push`, `pop`, `extend`) and tuple indexing (`edge.0`).
 * **Deep Type Checking:** Recursively validates generic types (e.g., `Vec<Vec<Location>>`) and custom Struct compatibility.
 
+### Hover and Autocomplete
+Using the semantic analysis, the LSP allows the user to more easily comprehend the types of different parts of the program:
+
+* **On-Hover Information:** Hovering over an expression or field gives information about the type of that expression or field.
+* **Variable Hover Depth:** Hovering over a subexpression versus an entire expression provides different information depending on the smallest hovered expression.
+* **Autocomplete:** Typing a `.` after a type or identifier provides autocomplete suggestions for fields and functions of that type.
+
 
 ### Syntax Highlighting
 Full-color syntax highlighting for `.qmrl` files including:
@@ -134,6 +141,7 @@ See `examples/Readme.md` for detailed explanations.
 ## Known Issues
 * **LSP Binary Location:** The extension currently looks for the language server in `amaro-lsp/target/debug/amaro-lsp`. You **must** run `cargo build` inside the `amaro-lsp` folder before launching the extension.
 * **Type Checking:** The `gate_type()` return type is treated as `Gate` for comparison purposes; enum variants are not distinguished.
+* **Hover Support:** Not all fields and types provide accurate hover information.
 
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
