@@ -1,8 +1,8 @@
 use super::symbols::*;
 use crate::ast::*;
-use std::{collections::HashMap, fmt::Binary};
+use std::collections::HashMap;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionItemTag, Diagnostic,
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, Diagnostic,
     DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range, Url,
 };
 
@@ -184,28 +184,28 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
         ExprKind::None => Type::Option(Box::new(Type::Unknown)),
         ExprKind::Identifier(name) => {
             if matches!(name.as_str(), "CX" | "T" | "Pauli" | "PauliMeasurement") {
-                return Type::Gate;
-            }
-
-            inference_data
-                .sym_table
-                .lookup(name)
-                .cloned()
-                .unwrap_or_else(|| {
-                    // check for user defined type
-                    match inference_data.user_def_table.get_fields(name) {
-                        Some(_) => Type::UserDef(name.clone()),
-                        None => {
-                            inference_data.diagnostics.push(Diagnostic {
-                                range: expr.range,
-                                severity: Some(DiagnosticSeverity::ERROR),
-                                message: format!("Undefined variable '{}'.", name),
-                                ..Default::default()
-                            });
-                            Type::Unknown
+                Type::Gate
+            } else {
+                inference_data
+                    .sym_table
+                    .lookup(name)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        // check for user defined type
+                        match inference_data.user_def_table.get_fields(name) {
+                            Some(_) => Type::UserDef(name.clone()),
+                            None => {
+                                inference_data.diagnostics.push(Diagnostic {
+                                    range: expr.range,
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    message: format!("Undefined variable '{}'.", name),
+                                    ..Default::default()
+                                });
+                                Type::Unknown
+                            }
                         }
-                    }
-                })
+                    })
+            }
         }
         ExprKind::List(items) => {
             if items.is_empty() {
@@ -651,7 +651,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 },
             }
         }
-        ExprKind::TensorProduct { left, right } => todo!(), // TODO what to do here?
+        ExprKind::TensorProduct { .. } => Type::Unknown, // TODO what to do here?
         ExprKind::Projection { index, tuple } => {
             // first, get type of the tuple
             let tuple_type = infer_expr_type(tuple, inference_data);
@@ -684,7 +684,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 }
             }
         }
-        _ => Type::Unknown,
     };
     inference_data.type_map.insert(expr.id, found_type.clone());
 
@@ -705,13 +704,13 @@ fn types_comparable(t1: &Type, t2: &Type) -> bool {
 // Math matching means that we can use >, <, +, -, etc.
 // Unknown is treated generously to avoid cascading errors.
 fn types_math(t1: &Type, t2: &Type) -> bool {
-    match t1 {
-        Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown => match t2 {
-            Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown => true,
-            _ => false,
-        },
-        _ => false,
-    }
+    matches!(
+        t1,
+        Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown
+    ) && matches!(
+        t2,
+        Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown
+    )
 }
 
 /// Checks if two types are compatible for assignment or comparison.
@@ -775,6 +774,10 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
     }
 }
 
+/// An autocomplete suggestion to show.
+/// Contains the replacement text along with the completion type.
+/// Modify this in order to most easily change the information provided in the
+/// autocomplete window.
 pub struct Suggestion {
     pub completion_text: String,
     pub completion_type: Type,
@@ -821,6 +824,8 @@ impl Suggestion {
         format!("{}", self.completion_type)
     }
 
+    /// Converts from a Suggestion to a CompletionItem.
+    /// The LSP uses CompletionItems.
     pub fn to_completion_item(&self) -> CompletionItem {
         CompletionItem {
             label: self.completion_text.clone(),
@@ -845,15 +850,15 @@ impl Suggestion {
     }
 }
 
-/// From a given type, identifies autocomplete suggestions.
-/// This would be what comes after the '.'
+/// From a given type, provides all autocomplete suggestions, if they exist.
+/// This would be what appears after the user types a '.'
 pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Option<Vec<Suggestion>> {
     match t1 {
         Type::Int | Type::Float | Type::Bool => None,
-        Type::String => None,   // not sure
-        Type::Location => None, // not sure
-        Type::Qubit => None,    // not sure
-        Type::QubitMap => None, // not sure
+        Type::String => None,
+        Type::Location => None,
+        Type::Qubit => None,
+        Type::QubitMap => None,
         Type::Gate => Some(vec![
             Suggestion {
                 completion_text: "qubits".to_string(),
@@ -961,7 +966,7 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
                 completion_type: Type::Unknown,
             },
         ]),
-        Type::InstrT => None, // not sure
+        Type::InstrT => None,
         Type::Vec(inner) => Some(vec![
             Suggestion {
                 completion_text: "push".to_string(),
@@ -1005,7 +1010,7 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
         ]),
         Type::Tuple(items) => {
             // show autocomplete for each item
-            if items.len() == 0 {
+            if items.is_empty() {
                 None
             } else {
                 Some(
@@ -1030,10 +1035,7 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
                 return_type: nested.clone(),
             },
         }]),
-        Type::Function {
-            params,
-            return_type,
-        } => None, // no suggestions for .
+        Type::Function { .. } => None,
         Type::Struct { fields, .. } => Some(
             fields
                 .iter()
@@ -1055,6 +1057,7 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
             }) // TODO
         }
         Type::Unknown => None,
+        Type::Generic(_) => None,
     }
 }
 

@@ -7,7 +7,9 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
 use crate::parser::symbols::{self, SymbolTable, Type, UserDefTable};
-use crate::parser::{InferenceData, check_semantics, infer_expr_type, parse_file, semantics, utils};
+use crate::parser::{
+    InferenceData, check_semantics, infer_expr_type, parse_file, semantics, utils,
+};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -483,7 +485,7 @@ impl LanguageServer for Backend {
         let guard = self.documents.read().await;
         let file_content = guard.get(&uri);
 
-        if let None = file_content {
+        if file_content.is_none() {
             return Err(Error::new(ErrorCode::InvalidRequest));
         }
 
@@ -498,45 +500,42 @@ impl LanguageServer for Backend {
         // determine if . was typed
         match utils::get_char_at(string_content, dot_pos) {
             None => {
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        "Position was not within bounds of document.",
-                    )
-                    .await;
-                return Ok(None)
-            },
-            Some('.') => {}, // matched the dot!
-            Some(c) => {
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        format!("Found character '{}' for completion.",c),
-                    )
-                    .await;
-                return Ok(None)
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         "Position was not within bounds of document.",
+                //     )
+                //     .await;
+                return Ok(None);
+            }
+            Some('.') => {} // matched the dot!
+            Some(_) => {
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         format!("Found character '{}' for completion.",c),
+                //     )
+                //     .await;
+                return Ok(None);
             } // we matched the dot
         }
-
 
         // parse the file into expressions
         let amaro_file = match parse_file(string_content) {
             Ok(f) => f,
             Err(_) => return Err(Error::new(ErrorCode::ParseError)),
         };
-        
 
         // so, we have [stuff][.][cursor]
         // we need to look 2 chars before
         let new_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(2));
 
-        
-        self.client
-            .log_message(
-                MessageType::INFO,
-                format!("Checking for expr at position {:?}", new_pos),
-            )
-            .await;
+        // self.client
+        //     .log_message(
+        //         MessageType::INFO,
+        //         format!("Checking for expr at position {:?}", new_pos),
+        //     )
+        //     .await;
 
         // find the largest expression containing this position before the dot
         let containing_expr = utils::largest_expr_containing(&amaro_file, new_pos);
@@ -544,13 +543,12 @@ impl LanguageServer for Backend {
         match containing_expr {
             // if we had an expression containing our goal pos...
             Ok(e) => {
-
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        format!("\tFound expression {} containing position.", e.kind),
-                    )
-                    .await;
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         format!("\tFound expression {} containing position.", e.kind),
+                //     )
+                //     .await;
 
                 // first, get user-defined structs
                 let user_def_table = UserDefTable::new(&amaro_file);
@@ -559,11 +557,11 @@ impl LanguageServer for Backend {
                 let mut type_map: HashMap<NodeId, Type> = HashMap::new();
                 let mut diags: Vec<Diagnostic> = Vec::new();
 
-                let mut inf_data = InferenceData { 
-                    sym_table: &mut sym_table, 
-                    diagnostics: &mut diags, 
-                    type_map: &mut type_map, 
-                    user_def_table: &user_def_table
+                let mut inf_data = InferenceData {
+                    sym_table: &mut sym_table,
+                    diagnostics: &mut diags,
+                    type_map: &mut type_map,
+                    user_def_table: &user_def_table,
                 };
 
                 // explore the expr
@@ -576,12 +574,12 @@ impl LanguageServer for Backend {
 
                 match utils::find_finishing_subexpr(e, goal_pos) {
                     Some(perfect_end_expr) => {
-                        self.client
-                            .log_message(
-                                MessageType::INFO,
-                                format!("\tFound perfectly finishing expression {}", perfect_end_expr.kind),
-                            )
-                            .await;
+                        // self.client
+                        //     .log_message(
+                        //         MessageType::INFO,
+                        //         format!("\tFound perfectly finishing expression {}", perfect_end_expr.kind),
+                        //     )
+                        //     .await;
 
                         // get the types and stuff
                         let found_type = match type_map.get(&perfect_end_expr.id) {
@@ -589,16 +587,14 @@ impl LanguageServer for Backend {
                             None => return Err(Error::new(ErrorCode::InternalError)),
                         };
 
-                        self.client
-                            .log_message(
-                                MessageType::INFO,
-                                format!("\tHas type {:?}", found_type),
-                            )
-                            .await;
+                        // self.client
+                        //     .log_message(
+                        //         MessageType::INFO,
+                        //         format!("\tHas type {:?}", found_type),
+                        //     )
+                        //     .await;
 
-                        
-
-                        match semantics::suggest_next_from_type(&found_type, &user_def_table) {
+                        match semantics::suggest_next_from_type(found_type, &user_def_table) {
                             Some(suggestions) => Ok(Some(CompletionResponse::Array(
                                 suggestions
                                     .iter()
@@ -610,26 +606,26 @@ impl LanguageServer for Backend {
                     }
                     // expression doesn't end at anything
                     None => {
-                        self.client
-                            .log_message(
-                                MessageType::INFO,
-                                "\tNo perfect ending expression found.".to_string(),
-                            )
-                            .await;
+                        // self.client
+                        //     .log_message(
+                        //         MessageType::INFO,
+                        //         "\tNo perfect ending expression found.".to_string(),
+                        //     )
+                        //     .await;
                         Ok(None)
-                    },
+                    }
                 }
             }
             // if we lacked an expression containing our goal pos...
             Err(_) => {
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        "\tNo expression found containg the position.".to_string(),
-                    )
-                    .await;
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         "\tNo expression found containg the position.".to_string(),
+                //     )
+                //     .await;
                 Ok(None) //
-            },
+            }
         }
     }
 
@@ -643,7 +639,7 @@ impl LanguageServer for Backend {
         let guard = self.documents.read().await;
         let file_content = guard.get(&uri);
 
-        if let None = file_content {
+        if file_content.is_none() {
             return Err(Error::new(ErrorCode::InvalidRequest));
         }
 
@@ -666,30 +662,27 @@ impl LanguageServer for Backend {
         if let Some((field_name, field_range)) = hovered_field {
             // need to lookup the name
             if let Some(field_type) = symbols::field_lookup(&field_name) {
-                return Ok(Some(Hover { 
-                    contents: HoverContents::Markup(
-                        MarkupContent { 
-                            kind: MarkupKind::PlainText, 
-                            value: format!("{}", field_type) }
-                    ), 
-                    range: Some(field_range)
-                }))
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::PlainText,
+                        value: format!("{}", field_type),
+                    }),
+                    range: Some(field_range),
+                }));
             } else {
                 // we are done. if we are hovered over a field but we don't
                 // have an entry, then there's nothing to show...
                 // TODO maybe change this, so it shows a question mark or some
                 // indication that we DID receive the hover, we  just dont know
                 // what we're supposed to do with it...
-                return Ok(Some(Hover { 
-                    contents: HoverContents::Markup(
-                        MarkupContent { 
-                            kind: MarkupKind::PlainText, 
-                            value: format!("{}\nUnrecognized field!", field_name) }
-                    ), 
-                    range: Some(field_range)
-                }))
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::PlainText,
+                        value: format!("{}\nUnrecognized field!", field_name),
+                    }),
+                    range: Some(field_range),
+                }));
             }
-            
         }
 
         // find the largest expression containing this position before the dot
@@ -698,13 +691,12 @@ impl LanguageServer for Backend {
         match containing_expr {
             // if we had an expression containing our goal pos...
             Ok(e) => {
-
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        format!("\tFound expression {} containing position.", e.kind),
-                    )
-                    .await;
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         format!("\tFound expression {} containing position.", e.kind),
+                //     )
+                //     .await;
 
                 // first, get user-defined structs
                 let user_def_table = UserDefTable::new(&amaro_file);
@@ -713,52 +705,40 @@ impl LanguageServer for Backend {
                 let mut type_map: HashMap<NodeId, Type> = HashMap::new();
                 let mut diags: Vec<Diagnostic> = Vec::new();
 
-                let mut inf_data = InferenceData { 
-                    sym_table: &mut sym_table, 
-                    diagnostics: &mut diags, 
-                    type_map: &mut type_map, 
-                    user_def_table: &user_def_table
+                let mut inf_data = InferenceData {
+                    sym_table: &mut sym_table,
+                    diagnostics: &mut diags,
+                    type_map: &mut type_map,
+                    user_def_table: &user_def_table,
                 };
 
                 // explore the expr
-                infer_expr_type(e, &mut inf_data);
-                
-                // TODO later, find smallest expression
+                let inferred_type = infer_expr_type(e, &mut inf_data);
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         format!("\tFound the type {}", inferred_type),
+                //     )
+                //     .await;
 
-                let found_type = match type_map.get(&e.id) {
-                    Some(t) => t,
-                    None => return Err(Error::new(ErrorCode::InternalError)),
-                };
-
-                if let Type::UserDef(n) = found_type {
-                    self.client
-                    .log_message(
-                        MessageType::INFO,
-                        format!("USER DEFINED TYPE {}",n),
-                    )
-                    .await;
-                }
-
-                Ok(Some(Hover { 
-                    contents: HoverContents::Markup(
-                        MarkupContent { 
-                            kind: MarkupKind::PlainText, 
-                            value: format!("{}", found_type) }
-                    ), 
-                    range: Some(e.range)
+                Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::PlainText,
+                        value: format!("{}", inferred_type),
+                    }),
+                    range: Some(e.range),
                 }))
-                
             }
             // if we lacked an expression containing our goal pos...
             Err(_) => {
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        "\tNo expression found containing the position.".to_string(),
-                    )
-                    .await;
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         "\tNo expression found containing the position.".to_string(),
+                //     )
+                //     .await;
                 Ok(None) //
-            },
+            }
         }
     }
 }

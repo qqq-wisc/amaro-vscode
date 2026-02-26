@@ -1,10 +1,8 @@
 use tower_lsp::lsp_types::{Position, Range};
 
-use crate::ast::TypeAnnotation;
 use crate::ast::AmaroFile;
 use crate::ast::Expr;
 use crate::ast::ExprKind;
-use crate::parser::symbols::Type;
 
 pub fn calc_range(full_text: &str, start_offset: usize, length: usize) -> Range {
     let abs_start = start_offset;
@@ -39,24 +37,26 @@ pub fn byte_to_position(text: &str, byte_idx: usize) -> (u32, u32) {
 /// Returns Some if the position exists, with the char
 pub fn get_char_at(text: &str, position: Position) -> Option<char> {
     if position.character == 0 && position.line == 0 {
-        return Some(text.chars().next().unwrap())
+        return Some(text.chars().next().unwrap());
     }
 
     let mut cur_line = 0;
     let mut cur_offset: Option<u32> = Some(0);
     for char in text.chars() {
-        if cur_line == position.line && cur_offset != None && cur_offset.unwrap() == position.character {
-            return Some(char)
+        if cur_line == position.line
+            && cur_offset.is_some()
+            && cur_offset.unwrap() == position.character
+        {
+            return Some(char);
         } else if cur_line > position.line {
-            return None
-            
+            return None;
         } else if char == '\n' {
-            cur_line+= 1;
+            cur_line += 1;
             cur_offset = None;
         } else {
             cur_offset = match cur_offset {
                 None => Some(0),
-                Some(i) => Some(i+1)
+                Some(i) => Some(i + 1),
             };
         }
     }
@@ -72,9 +72,7 @@ pub fn largest_expr_containing(file: &AmaroFile, position: Position) -> Result<&
     file.blocks
         .iter()
         .find_map(|block| {
-            let block_items = match &block.content {
-                crate::ast::BlockContent::Fields(block_items) => block_items,
-            };
+            let crate::ast::BlockContent::Fields(block_items) = &block.content;
 
             block_items
                 .iter()
@@ -110,14 +108,17 @@ pub fn smallest_expr_containing(file: &AmaroFile, position: Position) -> Result<
 pub fn field_name_containing(file: &AmaroFile, position: Position) -> Option<(String, Range)> {
     // i know this looks kinda horrible.
     // all this does is find a field (if one exists) which this position overlaps.
-    let found_field: Option<&crate::ast::Field> = file.blocks.iter().find_map(
-        |block| match &block.content {
+    let found_field: Option<&crate::ast::Field> = file.blocks.iter().find_map(|block| {
+        match &block.content {
             crate::ast::BlockContent::Fields(block_items) => block_items,
-        }.iter().filter_map(|elt| match elt {
+        }
+        .iter()
+        .filter_map(|elt| match elt {
             crate::ast::BlockItem::Field(f) => Some(f),
-            _ => None
-        }).find(|field| field.key_range.start <= position && field.key_range.end > position)
-    );
+            _ => None,
+        })
+        .find(|field| field.key_range.start <= position && field.key_range.end > position)
+    });
 
     // map to our option
     found_field.map(|field| (field.key.clone(), field.key_range))
@@ -125,7 +126,7 @@ pub fn field_name_containing(file: &AmaroFile, position: Position) -> Option<(St
 
 /// In an expression, finds the smallest subexpression containing the goal position, or None if the goal position isn't even in the original expression.
 /// If the goal position is in the original expression, then something will always be returned.
-fn find_smallest_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Option<&'a Expr> {
+fn find_smallest_subexpr(expr: &Expr, goal_position: Position) -> Option<&Expr> {
     if goal_position >= expr.range.end || goal_position < expr.range.start {
         None
     } else {
@@ -145,10 +146,8 @@ fn find_smallest_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Option<
                     .find_map(|elt| find_smallest_subexpr(elt, goal_position)))
             }
             ExprKind::FieldAccess { object, .. } => find_smallest_subexpr(object, goal_position),
-            ExprKind::IndexAccess { object, index } => {
-                find_smallest_subexpr(object, goal_position)
-                    .or(find_smallest_subexpr(index, goal_position))
-            }
+            ExprKind::IndexAccess { object, index } => find_smallest_subexpr(object, goal_position)
+                .or(find_smallest_subexpr(index, goal_position)),
             ExprKind::Lambda { body, .. } => find_smallest_subexpr(body, goal_position),
             ExprKind::IfThenElse {
                 condition,
@@ -157,10 +156,8 @@ fn find_smallest_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Option<
             } => find_smallest_subexpr(condition, goal_position)
                 .or(find_smallest_subexpr(then_branch, goal_position))
                 .or(find_smallest_subexpr(else_branch, goal_position)),
-            ExprKind::LetBinding { value, body, .. } => {
-                find_smallest_subexpr(value, goal_position)
-                    .or(find_smallest_subexpr(body, goal_position))
-            }
+            ExprKind::LetBinding { value, body, .. } => find_smallest_subexpr(value, goal_position)
+                .or(find_smallest_subexpr(body, goal_position)),
             ExprKind::BinaryOp { left, right, .. } => find_smallest_subexpr(left, goal_position)
                 .or(find_smallest_subexpr(right, goal_position)),
             ExprKind::UnaryOp { operand, .. } => find_smallest_subexpr(operand, goal_position),
@@ -172,13 +169,12 @@ fn find_smallest_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Option<
                     find_smallest_subexpr(right, goal_position)
                 }
             }
-            ExprKind::Projection { tuple, .. } => find_smallest_subexpr(&tuple, goal_position),
+            ExprKind::Projection { tuple, .. } => find_smallest_subexpr(tuple, goal_position),
             _ => None,
-        }.or(Some(expr))
+        }
+        .or(Some(expr))
     }
 }
-
-
 
 /// Given an expression, determines if its range ends at the provided goal
 /// position, then recursively explores any child expressions.
@@ -187,7 +183,7 @@ fn find_smallest_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Option<
 /// Note that the option might just contain the original expression, if the
 /// original expression ends at the given position. A return of None means that
 /// no subexpressions ended at the provided position.
-pub fn find_finishing_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Option<&'a Expr> {
+pub fn find_finishing_subexpr(expr: &Expr, goal_position: Position) -> Option<&Expr> {
     if expr.range.end == goal_position {
         Some(expr)
     } else if expr.range.start > goal_position || expr.range.end < goal_position {
@@ -236,45 +232,8 @@ pub fn find_finishing_subexpr<'a>(expr: &'a Expr, goal_position: Position) -> Op
                     find_finishing_subexpr(right, goal_position)
                 }
             }
-            ExprKind::Projection { tuple, .. } => find_finishing_subexpr(&tuple, goal_position),
+            ExprKind::Projection { tuple, .. } => find_finishing_subexpr(tuple, goal_position),
             _ => None,
         }
-    }
-}
-
-
-pub fn type_annotation_to_type(type_annotation: &TypeAnnotation) -> Type {
-    match type_annotation {
-        TypeAnnotation::Simple(name) => match name.as_str() {
-            "Int" => Type::Int,
-            "Float" => Type::Float,
-            "Bool" => Type::Bool,
-            "String" => Type::String,
-            "Location" => Type::Location,
-            "Arch" => Type::ArchT,
-            "Gate" => Type::Gate,
-            "Instr" => Type::InstrT, // TODO this right?
-            "Qubit" => Type::Qubit,
-            "QubitMap" => Type::QubitMap,
-            "State" => Type::StateT,
-            // if none of the built-in types, then assume it is a type defined
-            // by the user. could also be garbage
-            el => Type::UserDef(el.to_string())
-        },
-        TypeAnnotation::Generic(name, type_annotations) => match name.as_str() {
-            "Vec" => if type_annotations.len() != 1 {
-                Type::Unknown
-            } else {
-                Type::Vec(Box::new(type_annotation_to_type(&type_annotations[0])))
-            },
-            "Option" => if type_annotations.len() != 1 {
-                Type::Unknown
-            } else {
-                Type::Option(Box::new(type_annotation_to_type(&type_annotations[0])))
-            },
-            _ => Type::Unknown
-        },
-        TypeAnnotation::Tuple(type_annotations) => Type::Tuple(type_annotations.iter().map(|elt| type_annotation_to_type(elt)).collect()),
-        TypeAnnotation::Function { params, return_type } => Type::Function { params: params.iter().map(|elt| type_annotation_to_type(elt)).collect(), return_type: Box::new(type_annotation_to_type(return_type)) },
     }
 }

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Write};
 
-use crate::parser::utils;
+use crate::ast::TypeAnnotation;
 
 /// The type system for Amaro expressions.
 ///
@@ -37,15 +37,71 @@ pub enum Type {
         return_type: Box<Type>,
     },
 
-    UserDef(String),
-
     // Struct types
-    Struct { // TODO unhappy with this. I feel the info is redundant..
+    Struct {
+        // TODO unhappy with this. I feel the info is redundant..
         name: String,
         fields: HashMap<String, Type>,
     },
+    UserDef(String),
+
+    // Generic
+    Generic(u8), // local id for generic is the u8
 
     Unknown,
+}
+
+impl Type {
+    pub fn from_type_annotation(type_annotation: &TypeAnnotation) -> Self {
+        match type_annotation {
+            TypeAnnotation::Simple(name) => match name.as_str() {
+                "Int" => Type::Int,
+                "Float" => Type::Float,
+                "Bool" => Type::Bool,
+                "String" => Type::String,
+                "Location" => Type::Location,
+                "Arch" => Type::ArchT,
+                "Gate" => Type::Gate,
+                "Instr" => Type::InstrT, // TODO this right?
+                "Qubit" => Type::Qubit,
+                "QubitMap" => Type::QubitMap,
+                "State" => Type::StateT,
+                // if none of the built-in types, then assume it is a type defined
+                // by the user. could also be garbage
+                el => Type::UserDef(el.to_string()),
+            },
+            TypeAnnotation::Generic(name, type_annotations) => match name.as_str() {
+                "Vec" => {
+                    if type_annotations.len() != 1 {
+                        Type::Unknown
+                    } else {
+                        Type::Vec(Box::new(Self::from_type_annotation(&type_annotations[0])))
+                    }
+                }
+                "Option" => {
+                    if type_annotations.len() != 1 {
+                        Type::Unknown
+                    } else {
+                        Type::Option(Box::new(Self::from_type_annotation(&type_annotations[0])))
+                    }
+                }
+                _ => Type::Unknown,
+            },
+            TypeAnnotation::Tuple(type_annotations) => Type::Tuple(
+                type_annotations
+                    .iter()
+                    .map(Self::from_type_annotation)
+                    .collect(),
+            ),
+            TypeAnnotation::Function {
+                params,
+                return_type,
+            } => Type::Function {
+                params: params.iter().map(Self::from_type_annotation).collect(),
+                return_type: Box::new(Self::from_type_annotation(return_type)),
+            },
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -67,7 +123,6 @@ impl std::fmt::Display for Type {
                 f.write_char('(')?;
                 let mut iter = items.iter();
                 if let Some(first) = iter.next() {
-
                     write!(f, "{}", first)?;
                     for item in iter {
                         f.write_str(", ")?;
@@ -75,13 +130,18 @@ impl std::fmt::Display for Type {
                     }
                 }
                 f.write_char(')')
-            }, // make this pleasant..
-            Type::Option(inner) => f.write_str("Option<").and(inner.fmt(f)).and(f.write_char('>')),
-            Type::Function { params, return_type } => {
+            } // make this pleasant..
+            Type::Option(inner) => f
+                .write_str("Option<")
+                .and(inner.fmt(f))
+                .and(f.write_char('>')),
+            Type::Function {
+                params,
+                return_type,
+            } => {
                 f.write_char('(')?;
                 let mut iter = params.iter();
                 if let Some(first) = iter.next() {
-
                     write!(f, "{}", first)?;
                     for item in iter {
                         f.write_str(", ")?;
@@ -90,9 +150,10 @@ impl std::fmt::Display for Type {
                 }
                 f.write_str(") -> ")?;
                 return_type.fmt(f)
-            },
+            }
             Type::UserDef(name) => f.write_str(name),
-            Type::Struct { name, fields } => f.write_str(name),
+            Type::Struct { name, .. } => f.write_str(name),
+            Type::Generic(c) => f.write_char('T').and(f.write_char(*c as char)),
             Type::Unknown => f.write_char('?'),
         }
     }
@@ -112,36 +173,47 @@ pub struct SymbolTable {
 /// Then, we can reference these types from here by name.
 pub struct UserDefTable {
     /// maps from type names (like Transition) to their fields
-    map: HashMap<String, UserDefEntry>
+    map: HashMap<String, UserDefEntry>,
 }
 
 struct UserDefEntry {
-    fields: HashMap<String, Type>
+    fields: HashMap<String, Type>,
 }
 
 impl UserDefTable {
-    /// Given an AmaroFile, creates a UserDefTable which determines the fields 
-    /// of user-defined types
+    /// Given an AmaroFile, creates a UserDefTable which determines the fields
+    /// of user-defined types.
     pub fn new(file: &crate::ast::AmaroFile) -> Self {
         // TODO what if there are errors? need diagnostics?
         let mut map: HashMap<String, UserDefEntry> = HashMap::new();
 
         for block in &file.blocks {
-            let items = match &block.content {
-                crate::ast::BlockContent::Fields(block_items) => block_items,
-            };
-            items.iter().filter_map(|elt| match elt {
-                crate::ast::BlockItem::Field(_) => None,
-                crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
-            }).for_each(|struct_def| {
-                let fields = struct_def.fields.iter().map(|elt| (elt.name.clone(), utils::type_annotation_to_type(&elt.type_annotation))).collect();
-                map.insert(struct_def.name.clone(), UserDefEntry { fields: fields });
-            })
+            let crate::ast::BlockContent::Fields(items) = &block.content;
+            items
+                .iter()
+                .filter_map(|elt| match elt {
+                    crate::ast::BlockItem::Field(_) => None,
+                    crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
+                })
+                .for_each(|struct_def| {
+                    let fields = struct_def
+                        .fields
+                        .iter()
+                        .map(|elt| {
+                            (
+                                elt.name.clone(),
+                                Type::from_type_annotation(&elt.type_annotation),
+                            )
+                        })
+                        .collect();
+                    map.insert(struct_def.name.clone(), UserDefEntry { fields });
+                })
         }
 
         UserDefTable { map }
     }
 
+    /// Gets the fields of a user-defined type, if the type has a definition.
     pub fn get_fields(&self, identifier: &str) -> Option<&HashMap<String, Type>> {
         self.map.get(identifier).map(|elt| &elt.fields)
     }
@@ -199,19 +271,17 @@ impl SymbolTable {
         scope.insert("step".to_string(), Type::Int);
         scope.insert(
             "Transition".to_string(),
-            Type::UserDef("Transition".to_string())
-            // Type::Struct {
-            //     name: "Transition".to_string(),
-            //     fields: HashMap::new(),
-            // },
+            Type::UserDef("Transition".to_string()), // Type::Struct {
+                                                     //     name: "Transition".to_string(),
+                                                     //     fields: HashMap::new(),
+                                                     // },
         );
         scope.insert(
             "GateRealization".to_string(),
-            Type::UserDef("GateRealization".to_string())
-            // Type::Struct {
-            //     name: "GateRealization".to_string(),
-            //     fields: HashMap::new(),
-            // },
+            Type::UserDef("GateRealization".to_string()), // Type::Struct {
+                                                          //     name: "GateRealization".to_string(),
+                                                          //     fields: HashMap::new(),
+                                                          // },
         );
     }
 
@@ -388,25 +458,29 @@ impl Default for SymbolTable {
 
 /// Blocks have fields.
 /// Fields each have an expected type signature.
-/// For instance, cost maps from Transition to Float.
+/// For instance, 'cost' maps from Transition to Float.
 /// This lets us lookup the expected type signature of a field.
 pub fn field_lookup(field: &str) -> Option<Type> {
     match field {
-        "cost" => Some(Type::Function { params: vec![Type::UserDef("Transition".to_string())], return_type: Box::new(Type::Float) }),
-        "realize_gate" => Some(Type::Function { params: vec![
-            Type::ArchT,
-            Type::StateT,
-            Type::Gate
-        ], return_type: Box::new(Type::Vec(Box::new(Type::UserDef("GateRealization".to_string())))) }),
-        "get_transitions" => Some(Type::Function { params: vec![
-            Type::ArchT,
-            Type::StateT
-        ], return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))) }),
-        "apply" => Some(Type::Function { params: vec![
-            Type::QubitMap,
-            Type::UserDef("Transition".to_string())
-        ], return_type: Box::new(Type::QubitMap) }),
-        _ => None
+        "cost" => Some(Type::Function {
+            params: vec![Type::UserDef("Transition".to_string())],
+            return_type: Box::new(Type::Float),
+        }),
+        "realize_gate" => Some(Type::Function {
+            params: vec![Type::ArchT, Type::StateT, Type::Gate],
+            return_type: Box::new(Type::Option(Box::new(Type::UserDef(
+                "GateRealization".to_string(),
+            )))),
+        }),
+        "get_transitions" => Some(Type::Function {
+            params: vec![Type::ArchT, Type::StateT],
+            return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))),
+        }),
+        "apply" => Some(Type::Function {
+            params: vec![Type::QubitMap, Type::UserDef("Transition".to_string())],
+            return_type: Box::new(Type::QubitMap),
+        }),
+        "routed_gates" => Some(Type::Gate),
+        _ => None,
     }
 }
-
