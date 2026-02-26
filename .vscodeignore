@@ -22,3 +22,5 @@ amaro-lsp/target/**
 
 # CRITICAL: Force-include the release binary
 !amaro-lsp/target/release/amaro-lsp
+
+!bin/

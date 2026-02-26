@@ -4,7 +4,7 @@ All notable changes to the "amaro-vscode" extension will be documented in this f
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
-## [1.0.2] - 2026-02-26
+## [1.0.3] - 2026-02-26
 
 ### Added
 - **Autocomplete:** Typing a '.' after some types will provide autocomplete options. For instance, typing `Arch.` shows the fields and functions on `Arch`.
@@ -17,6 +17,19 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
 ### Fixed
 - Invalid ranges applied to some expressions. Now, ranges accurately reflect start and end bounds of all expressions.
+
+## [1.0.2] - 2026-02-18
+
+### Added
+- **Multi-Platform Support:** Bundled pre-compiled binaries for Windows (`win32`), macOS (`darwin`), and Linux (`linux`) directly in the extension.
+- **Automatic OS Detection:** The extension now automatically detects the operating system and launches the correct language server binary.
+- **WSL Compatibility:** Added specific support for running in Windows Subsystem for Linux (WSL) environments by serving the native Linux binary.
+
+### Fixed
+- **"Cargo Build" Requirement:** Removed the need for users to install Rust or run `cargo build` manually. The extension now works out-of-the-box.
+- **Permission Errors:** Added automatic `chmod +x` (755) execution for binaries on macOS and Linux to prevent "permission denied" errors on first run.
+- **Exec Format Error:** Fixed the crash where WSL/Linux environments attempted to execute the macOS binary by mistake.
+
 
 ## [1.0.1] - 2026-02-16
 

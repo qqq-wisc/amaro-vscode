@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { workspace, ExtensionContext, window } from 'vscode';
 import {
   LanguageClient,
@@ -13,10 +14,23 @@ let client: LanguageClient;
 export function activate(context: ExtensionContext) {
 	console.log("Activating Amaro Extension...");
 
-	const binaryName = process.platform === 'win32' ? 'amaro-lsp.exe' : 'amaro-lsp';
+	const platform = os.platform();
+    let binaryName = '';
+	if (platform === 'win32') {
+        binaryName = 'amaro-lsp-win.exe';
+    } else if (platform === 'darwin') {
+        binaryName = 'amaro-lsp-mac';
+    } else if (platform === 'linux') {
+        binaryName = 'amaro-lsp-linux';
+    } else {
+        window.showErrorMessage(`Amaro is not supported on this OS: ${platform}`);
+        return;
+    }
+
 	const serverPath = context.asAbsolutePath(
-		path.join('amaro-lsp', 'target', 'release', binaryName)
-	);
+        path.join('bin', binaryName)
+    );
+
 	console.log(`Looking for LSP binary at: ${serverPath}`);
 
 	if (!fs.existsSync(serverPath)) {
@@ -25,8 +39,12 @@ export function activate(context: ExtensionContext) {
 		return;
 	}
 
-	if (process.platform !== 'win32') {
-		fs.chmodSync(serverPath, '755');
+	if (platform !== 'win32') {
+		try {
+            fs.chmodSync(serverPath, '755');
+        } catch (err) {
+            console.error(`Failed to set permissions for ${serverPath}:`, err);
+        }
 	}
 
 	const serverOptions: ServerOptions = {
