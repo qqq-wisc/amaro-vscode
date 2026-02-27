@@ -634,6 +634,13 @@ impl LanguageServer for Backend {
         // right now, we only cache the text and not the expressions & stuff.
         // this is a lot of repeated work if the user changes hover often
 
+        // self.client
+        //     .log_message(
+        //         MessageType::INFO,
+        //         "We are trying to hover.".to_string(),
+        //     )
+        //     .await;
+
         // get the text doc
         let uri = params.text_document_position_params.text_document.uri;
         let guard = self.documents.read().await;
