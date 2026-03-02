@@ -408,8 +408,6 @@ fn parse_postfix_expr<'a>(
 ) -> IResult<&'a str, Expr> {
     let (mut current_input, mut base) = parse_primary_expr(original_input, input, ctx)?;
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    //base.range.start.character as usize; // TODO i think this is wrong
-    // Why is start just the character of the position? Should take into account more
 
     loop {
         if let Ok((rest, _)) = ws(char('.'))(current_input) {

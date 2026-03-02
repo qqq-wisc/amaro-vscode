@@ -493,8 +493,7 @@ impl LanguageServer for Backend {
 
         // get original position of cursor. this is after the dot.
         let orig_pos = params.text_document_position.position;
-        // TODO hmm, i think i should only have to sub by 1.
-        // this doesn't please me.
+        // dot needs 2 spaces before the cursor position, for a strange reason!
         let dot_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(2));
 
         // determine if . was typed
@@ -528,7 +527,7 @@ impl LanguageServer for Backend {
 
         // so, we have [stuff][.][cursor]
         // we need to look 2 chars before
-        let new_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(2));
+        let before_dot_pos = Position::new(dot_pos.line, dot_pos.character.saturating_sub(1));
 
         // self.client
         //     .log_message(
@@ -538,7 +537,7 @@ impl LanguageServer for Backend {
         //     .await;
 
         // find the largest expression containing this position before the dot
-        let containing_expr = utils::largest_expr_containing(&amaro_file, new_pos);
+        let containing_expr = utils::largest_expr_containing(&amaro_file, before_dot_pos);
 
         match containing_expr {
             // if we had an expression containing our goal pos...
@@ -570,7 +569,7 @@ impl LanguageServer for Backend {
                 // now, need to find the expr right before our cursor, and get
                 // the type of that one.
                 // expr should end at the dot i think?
-                let goal_pos = Position::new(new_pos.line, new_pos.character + 1);
+                let goal_pos = Position::new(dot_pos.line, dot_pos.character + 1);
 
                 match utils::find_finishing_subexpr(e, goal_pos) {
                     Some(perfect_end_expr) => {
@@ -661,8 +660,6 @@ impl LanguageServer for Backend {
             Err(_) => return Err(Error::new(ErrorCode::ParseError)),
         };
 
-        // TODO make hover work for more than just expressions
-
         // first, check field names.
         let hovered_field = utils::field_name_containing(&amaro_file, orig_pos);
 
@@ -679,16 +676,9 @@ impl LanguageServer for Backend {
             } else {
                 // we are done. if we are hovered over a field but we don't
                 // have an entry, then there's nothing to show...
-                // TODO maybe change this, so it shows a question mark or some
-                // indication that we DID receive the hover, we  just dont know
-                // what we're supposed to do with it...
-                return Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::PlainText,
-                        value: format!("{}\nUnrecognized field!", field_name),
-                    }),
-                    range: Some(field_range),
-                }));
+                // LS: Would be good to display something indicating that the
+                // thing we are hovering over is not recognized by the program
+                return Ok(None);
             }
         }
 

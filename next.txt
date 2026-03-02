@@ -1,8 +1,0 @@
-1. get in all left-side hovers
-2. autocomplete for built-in functions using special character
-3. complaining for LHS and RHS type mismatch
-4. Rust-analyzer type inference (grayed out)
-5. detailed function info on hover
-6. being able to hover over structs and stuff-- the things that dont work on hover yet
-7. color for hover info
-8. meta-programming to generate non-hardcoded version

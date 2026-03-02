@@ -382,8 +382,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         Type::Unknown
                     }
                 }
-                // Type::UserDef(name) => inference_data.user_def_table // TODO
-                //Type::Struct { fields, .. } => fields.get(field).cloned().unwrap_or(Type::Unknown),
+                Type::Struct { fields, .. } => fields.get(field).cloned().unwrap_or(Type::Unknown),
                 Type::Tuple(elements) => {
                     if let Ok(idx) = field.parse::<usize>() {
                         elements.get(idx).cloned().unwrap_or(Type::Unknown)
@@ -536,15 +535,34 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 | BinaryOperator::Mul
                 | BinaryOperator::Div
                 | BinaryOperator::Mod => match types_math(&left_type, &right_type) {
-                    true => left_type.clone(), // TODO which type to use...?!
-                    false => {
+                    Some(t) => t,
+                    None => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            // TODO deal with auto-casting of Location
+                            
                             message: format!(
-                                "Cannot use math operations on types {} and {}.",
-                                left_type, right_type
+                                "Cannot use operation {:?} on types {} and {}.",
+                                op, left_type, right_type
+                            ),
+                            ..Default::default()
+                        });
+                        Type::Unknown
+                    }
+                },
+                BinaryOperator::Ge
+                | BinaryOperator::Le
+                | BinaryOperator::Gt
+                | BinaryOperator::Lt => match types_math(&left_type, &right_type) {
+                    Some(_) => Type::Bool,
+                    None => {
+                        inference_data.diagnostics.push(Diagnostic {
+                            range: expr.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            
+                            message: format!(
+                                "Cannot use operation {:?} on types {} and {}.",
+                                op, left_type, right_type
                             ),
                             ..Default::default()
                         });
@@ -559,7 +577,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                                 inference_data.diagnostics.push(Diagnostic {
                                     range: expr.range,
                                     severity: Some(DiagnosticSeverity::ERROR),
-                                    // TODO deal with auto-casting of Location
                                     message: format!(
                                         "Cannot use equality on types {} and {}.",
                                         left_type, right_type
@@ -571,25 +588,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         }
                     }
                 }
-                BinaryOperator::Lt
-                | BinaryOperator::Le
-                | BinaryOperator::Gt
-                | BinaryOperator::Ge => match types_math(&left_type, &right_type) {
-                    true => Type::Bool,
-                    false => {
-                        inference_data.diagnostics.push(Diagnostic {
-                            range: expr.range,
-                            severity: Some(DiagnosticSeverity::ERROR),
-                            // TODO deal with auto-casting of Location
-                            message: format!(
-                                "Cannot use math comparison operations on types {} and {}.",
-                                left_type, right_type
-                            ),
-                            ..Default::default()
-                        });
-                        Type::Unknown
-                    }
-                },
 
                 BinaryOperator::And | BinaryOperator::Or => match (&left_type, &right_type) {
                     (Type::Bool, Type::Bool) => Type::Bool,
@@ -597,7 +595,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            // TODO deal with auto-casting of Location
+                            
                             message: format!(
                                 "Cannot use logical operations on types {} and {}.",
                                 left_type, right_type
@@ -607,16 +605,9 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         Type::Unknown
                     }
                 },
-                _ => {
-                    inference_data.diagnostics.push(Diagnostic {
-                        range: expr.range,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        // TODO deal with auto-casting of Location
-                        message: format!("Operator {:?} not yet implemented.", op),
-                        ..Default::default()
-                    });
-                    Type::Unknown
-                }
+
+                BinaryOperator::Tensor => Type::Unknown,
+                BinaryOperator::Range => Type::Unknown,
             }
         }
         ExprKind::UnaryOp { op, operand } => {
@@ -628,7 +619,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            // TODO is this really all of them? Surely other types may participate.
                             message: "Cannot perform NOT operation on non-bool type.".to_string(),
                             ..Default::default()
                         });
@@ -642,7 +632,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            // TODO is this really all of them? Surely other types may participate.
                             message: "Cannot perform NEG operation on non-number type.".to_string(),
                             ..Default::default()
                         });
@@ -663,7 +652,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             inference_data.diagnostics.push(Diagnostic {
                                 range: expr.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
-                                // TODO is this really all of them? Surely other types may participate.
+                                
                                 message: "Index of projection was out-of-bounds for the tuple."
                                     .to_string(),
                                 ..Default::default()
@@ -676,7 +665,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,
                         severity: Some(DiagnosticSeverity::ERROR),
-                        // TODO is this really all of them? Surely other types may participate.
+                        
                         message: format!("Cannot perform projection on type {}", tuple_type),
                         ..Default::default()
                     });
@@ -693,7 +682,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
 /// Comparisons are things like == or !=
 /// Unknown is treated generously to avoid cascading errors.
 fn types_comparable(t1: &Type, t2: &Type) -> bool {
-    if types_math(t1, t2) {
+    if types_math(t1, t2).is_some() {
         // math types treated all as just numbers
         true
     } else {
@@ -701,16 +690,50 @@ fn types_comparable(t1: &Type, t2: &Type) -> bool {
     }
 }
 
-// Math matching means that we can use >, <, +, -, etc.
+// If this returns Some, then the types are ones we can use <, >, +, *, etc
+// on. If this returns Some, it additionally gives the resulting type of the
+// operation GIVEN that it is one of plus, minus, times, divides, or mod.
+// If this returns None, then we cannot use math operations on these two.
 // Unknown is treated generously to avoid cascading errors.
-fn types_math(t1: &Type, t2: &Type) -> bool {
-    matches!(
-        t1,
-        Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown
-    ) && matches!(
-        t2,
-        Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown
-    )
+fn types_math(t1: &Type, t2: &Type) -> Option<Type> {
+    match t1 {
+        // if first type is int, then we can deal with 'autocast' here
+        Type::Int => {
+            if matches!(t2, Type::Int | Type::Float | Type::Location | Type::Qubit) {
+                Some(t2.clone())
+            } else if matches!(t2, Type::Unknown) {
+                Some(Type::Int)
+            } else {
+                None
+            }
+        }
+
+        // if first type is one of the other math-y types, then we can do a math
+        // op if the other type is an int, or just if the two types are equal
+        Type::Float | Type::Bool | Type::Location | Type::Qubit => {
+            if matches!(t2, Type::Int) || t1 == t2 {
+                Some(t1.clone())
+            } else {
+                None
+            }
+        }
+
+        // avoid propigating errors
+        // if t1 is unknown, permit so long as t2 is a math type (or unknown)
+        Type::Unknown => {
+            if matches!(
+                t2,
+                Type::Int | Type::Float | Type::Location | Type::Qubit | Type::Unknown
+            ) {
+                Some(t2.clone())
+            } else {
+                None
+            }
+        }
+
+        // t1 needs to at least be one of the above types
+        _ => None,
+    }
 }
 
 /// Checks if two types are compatible for assignment or comparison.
@@ -778,6 +801,7 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
 /// Contains the replacement text along with the completion type.
 /// Modify this in order to most easily change the information provided in the
 /// autocomplete window.
+#[derive(PartialEq, Debug)]
 pub struct Suggestion {
     pub completion_text: String,
     pub completion_type: Type,
@@ -832,20 +856,7 @@ impl Suggestion {
             label_details: Some(self.get_completion_item_label_details()),
             kind: Some(self.get_completion_item_kind()),
             detail: Some(self.get_completion_item_detail()),
-            documentation: None,
-            deprecated: Some(false),
-            preselect: Some(false),
-            sort_text: None,
-            filter_text: None,
-            insert_text: None,
-            insert_text_format: None,
-            insert_text_mode: None,
-            text_edit: None,
-            additional_text_edits: None,
-            command: None,
-            commit_characters: None,
-            data: None,
-            tags: None,
+            ..Default::default()
         }
     }
 }
@@ -1026,9 +1037,7 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
             }
         }
         Type::Option(nested) => Some(vec![Suggestion {
-            // TODO to be clear, I don't know that this is what we want.
-            // I'm assuming we want an unwrap for options.
-            // What else hould options have?
+            // TODO identify additional functions that we want for Option
             completion_text: "unwrap".to_string(),
             completion_type: Type::Function {
                 params: vec![],
@@ -1054,7 +1063,7 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
                         completion_type: entry.1.clone(),
                     })
                     .collect()
-            }) // TODO
+            })
         }
         Type::Unknown => None,
         Type::Generic(_) => None,
@@ -1063,6 +1072,8 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
 
 #[cfg(test)]
 mod tests {
+    use tower_lsp::lsp_types::Position;
+
     use super::*;
 
     #[test]
@@ -1127,5 +1138,431 @@ mod tests {
         assert!(types_compatible(&fn1, &fn2));
         assert!(!types_compatible(&fn1, &fn3));
         assert!(!types_compatible(&fn1, &fn4));
+    }
+
+    #[test]
+    fn test_infer_bin_op_math() {
+        let mut diags = Vec::new();
+        let mut inf_data = InferenceData {
+            sym_table: &mut SymbolTable::new(),
+            diagnostics: &mut diags,
+            type_map: &mut HashMap::new(),
+            user_def_table: &UserDefTable::empty(),
+        };
+
+        let def_range = Range {
+            start: Position::new(0, 0),
+            end: Position::new(0, 0),
+        };
+        let expr_float_add = Expr {
+            kind: ExprKind::BinaryOp {
+                op: BinaryOperator::Add,
+                left: Box::new(Expr {
+                    kind: ExprKind::FloatLiteral(3.0),
+                    range: def_range.clone(),
+                    id: NodeId(1),
+                }),
+                right: Box::new(Expr {
+                    kind: ExprKind::FloatLiteral(5.0),
+                    range: def_range.clone(),
+                    id: NodeId(2),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(0),
+        };
+
+        let expr_int_mul = Expr {
+            kind: ExprKind::BinaryOp {
+                op: BinaryOperator::Mul,
+                left: Box::new(Expr {
+                    kind: ExprKind::IntLiteral(6),
+                    range: def_range.clone(),
+                    id: NodeId(6),
+                }),
+                right: Box::new(Expr {
+                    kind: ExprKind::IntLiteral(-3),
+                    range: def_range.clone(),
+                    id: NodeId(7),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(8),
+        };
+
+        let expr_loc_autocast = Expr {
+            kind: ExprKind::BinaryOp {
+                op: BinaryOperator::Div,
+                left: Box::new(Expr {
+                    kind: ExprKind::IntLiteral(6),
+                    range: def_range.clone(),
+                    id: NodeId(3),
+                }),
+                right: Box::new(Expr {
+                    kind: ExprKind::FunctionCall {
+                        function: Box::new(Expr {
+                            kind: ExprKind::Identifier("Location".to_string()),
+                            range: def_range.clone(),
+                            id: NodeId(50),
+                        }),
+                        args: vec![Expr {
+                            kind: ExprKind::IntLiteral(100),
+                            range: def_range.clone(),
+                            id: NodeId(51),
+                        }],
+                    },
+                    range: def_range.clone(),
+                    id: NodeId(4),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(5),
+        };
+
+        let expr_qubit_autocast = Expr {
+            kind: ExprKind::BinaryOp {
+                op: BinaryOperator::Div,
+                left: Box::new(Expr {
+                    kind: ExprKind::FunctionCall {
+                        function: Box::new(Expr {
+                            kind: ExprKind::Identifier("Qubit".to_string()),
+                            range: def_range.clone(),
+                            id: NodeId(60),
+                        }),
+                        args: vec![Expr {
+                            kind: ExprKind::IntLiteral(2),
+                            range: def_range.clone(),
+                            id: NodeId(61),
+                        }],
+                    },
+                    range: def_range.clone(),
+                    id: NodeId(62),
+                }),
+                right: Box::new(Expr {
+                    kind: ExprKind::IntLiteral(3),
+                    range: def_range.clone(),
+                    id: NodeId(63),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(64),
+        };
+
+        let expr_odd_types = Expr {
+            kind: ExprKind::BinaryOp {
+                op: BinaryOperator::Ge,
+                left: Box::new(Expr {
+                    kind: ExprKind::FunctionCall {
+                        function: Box::new(Expr {
+                            kind: ExprKind::Identifier("Qubit".to_string()),
+                            range: def_range.clone(),
+                            id: NodeId(60),
+                        }),
+                        args: vec![Expr {
+                            kind: ExprKind::IntLiteral(2),
+                            range: def_range.clone(),
+                            id: NodeId(71),
+                        }],
+                    },
+                    range: def_range.clone(),
+                    id: NodeId(72),
+                }),
+                right: Box::new(Expr {
+                    kind: ExprKind::FloatLiteral(5.0),
+                    range: def_range.clone(),
+                    id: NodeId(73),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(74),
+        };
+        assert_eq!(Type::Float, infer_expr_type(&expr_float_add, &mut inf_data));
+        assert_eq!(inf_data.diagnostics.len(), 0);
+        assert_eq!(Type::Int, infer_expr_type(&expr_int_mul, &mut inf_data));
+        assert_eq!(inf_data.diagnostics.len(), 0);
+        assert_eq!(
+            Type::Location,
+            infer_expr_type(&expr_loc_autocast, &mut inf_data)
+        );
+        println!("{:?}", inf_data.diagnostics);
+        assert_eq!(inf_data.diagnostics.len(), 0);
+        assert_eq!(
+            Type::Qubit,
+            infer_expr_type(&expr_qubit_autocast, &mut inf_data)
+        );
+        assert_eq!(inf_data.diagnostics.len(), 0);
+
+        infer_expr_type(&expr_odd_types, &mut inf_data);
+        assert!(inf_data.diagnostics.len() > 0);
+    }
+
+    #[test]
+    fn test_infer_bin_op_logic() {
+        let mut diags = Vec::new();
+        let mut inf_data = InferenceData {
+            sym_table: &mut SymbolTable::new(),
+            diagnostics: &mut diags,
+            type_map: &mut HashMap::new(),
+            user_def_table: &UserDefTable::empty(),
+        };
+
+        let def_range = Range {
+            start: Position::new(0, 0),
+            end: Position::new(0, 0),
+        };
+        let expr_valid = Expr {
+            kind: ExprKind::BinaryOp {
+                op: BinaryOperator::And,
+                left: Box::new(Expr {
+                    kind: ExprKind::BoolLiteral(true),
+                    range: def_range.clone(),
+                    id: NodeId(1),
+                }),
+                right: Box::new(Expr {
+                    kind: ExprKind::BoolLiteral(false),
+                    range: def_range.clone(),
+                    id: NodeId(2),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(0),
+        };
+
+        let expr_invalid = Expr {
+            kind: ExprKind::BinaryOp {
+                op: BinaryOperator::And,
+                left: Box::new(Expr {
+                    kind: ExprKind::BoolLiteral(true),
+                    range: def_range.clone(),
+                    id: NodeId(10),
+                }),
+                right: Box::new(Expr {
+                    kind: ExprKind::Projection {
+                        index: 1,
+                        tuple: Box::new(Expr {
+                            range: def_range.clone(),
+                            id: NodeId(11),
+                            kind: ExprKind::Tuple(vec![
+                                Expr {
+                                    range: def_range.clone(),
+                                    id: NodeId(12),
+                                    kind: ExprKind::BoolLiteral(true),
+                                },
+                                Expr {
+                                    range: def_range.clone(),
+                                    id: NodeId(13),
+                                    kind: ExprKind::IntLiteral(1),
+                                },
+                            ]),
+                        }),
+                    },
+                    range: def_range.clone(),
+                    id: NodeId(14),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(15),
+        };
+
+        assert_eq!(Type::Bool, infer_expr_type(&expr_valid, &mut inf_data));
+        assert_eq!(inf_data.diagnostics.len(), 0);
+
+        infer_expr_type(&expr_invalid, &mut inf_data);
+        assert!(inf_data.diagnostics.len() > 0);
+    }
+
+    #[test]
+    fn test_infer_unary() {
+        let mut diags = Vec::new();
+        let mut inf_data = InferenceData {
+            sym_table: &mut SymbolTable::new(),
+            diagnostics: &mut diags,
+            type_map: &mut HashMap::new(),
+            user_def_table: &UserDefTable::empty(),
+        };
+
+        let def_range = Range {
+            start: Position::new(0, 0),
+            end: Position::new(0, 0),
+        };
+        let not_on_valid = Expr {
+            kind: ExprKind::UnaryOp {
+                op: UnaryOperator::Not,
+                operand: Box::new(Expr {
+                    kind: ExprKind::BoolLiteral(true),
+                    range: def_range.clone(),
+                    id: NodeId(0),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(1),
+        };
+
+        let not_on_invalid = Expr {
+            kind: ExprKind::UnaryOp {
+                op: UnaryOperator::Not,
+                operand: Box::new(Expr {
+                    kind: ExprKind::FloatLiteral(-5.0),
+                    range: def_range.clone(),
+                    id: NodeId(2),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(3),
+        };
+
+        let neg_on_valid = Expr {
+            kind: ExprKind::UnaryOp {
+                op: UnaryOperator::Neg,
+                operand: Box::new(Expr {
+                    kind: ExprKind::FloatLiteral(-5.0),
+                    range: def_range.clone(),
+                    id: NodeId(3),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(4),
+        };
+
+        let neg_on_invalid = Expr {
+            kind: ExprKind::UnaryOp {
+                op: UnaryOperator::Neg,
+                operand: Box::new(Expr {
+                    kind: ExprKind::Identifier("vec".to_string()),
+                    range: def_range.clone(),
+                    id: NodeId(5),
+                }),
+            },
+            range: def_range.clone(),
+            id: NodeId(6),
+        };
+
+        assert_eq!(Type::Bool, infer_expr_type(&not_on_valid, &mut inf_data));
+        assert_eq!(inf_data.diagnostics.len(), 0);
+
+        infer_expr_type(&not_on_invalid, &mut inf_data);
+        assert!(inf_data.diagnostics.len() > 0);
+
+        // reset diags
+        let mut new_diags = Vec::new();
+        inf_data.diagnostics = &mut new_diags;
+
+        assert_eq!(Type::Float, infer_expr_type(&neg_on_valid, &mut inf_data));
+        assert_eq!(inf_data.diagnostics.len(), 0);
+
+        infer_expr_type(&neg_on_invalid, &mut inf_data);
+        assert!(inf_data.diagnostics.len() > 0);
+    }
+
+    #[test]
+    fn test_suggest_next_from_type() {
+        // make a user-def table
+        let user_def_table = UserDefTable::empty();
+
+        assert!(suggest_next_from_type(&Type::Int, &user_def_table).is_none());
+
+        let arch_res = suggest_next_from_type(&Type::ArchT, &user_def_table);
+        assert!(arch_res.is_some());
+        let arch_res = arch_res.unwrap();
+        assert_eq!(
+            arch_res,
+            vec![
+                Suggestion {
+                    completion_text: "width".to_string(),
+                    completion_type: Type::Int,
+                },
+                Suggestion {
+                    completion_text: "height".to_string(),
+                    completion_type: Type::Int,
+                },
+                Suggestion {
+                    completion_text: "stack_size".to_string(),
+                    completion_type: Type::Int,
+                },
+                Suggestion {
+                    completion_text: "edges".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![
+                            Type::Location,
+                            Type::Location,
+                        ])))),
+                    },
+                },
+                Suggestion {
+                    completion_text: "succ_rates".to_string(),
+                    completion_type: Type::Vec(Box::new(Type::Vec(Box::new(Type::Float)))),
+                },
+                Suggestion {
+                    completion_text: "contains_edge".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
+                        return_type: Box::new(Type::Bool),
+                    },
+                },
+                Suggestion {
+                    completion_text: "magic_state_qubits".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                    },
+                },
+                Suggestion {
+                    completion_text: "alg_qubits".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                    },
+                }
+            ]
+        );
+
+        let vec_res = suggest_next_from_type(&Type::Vec(Box::new(Type::QubitMap)), &user_def_table);
+        assert!(vec_res.is_some());
+        let vec_res = vec_res.unwrap();
+        assert_eq!(
+            vec_res,
+            vec![
+                Suggestion {
+                    completion_text: "push".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![Type::QubitMap],
+                        return_type: Box::new(Type::Vec(Box::new(Type::QubitMap))),
+                    },
+                },
+                Suggestion {
+                    completion_text: "pop".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Option(Box::new(Type::QubitMap))),
+                    },
+                },
+                Suggestion {
+                    completion_text: "extend".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![Type::Vec(Box::new(Type::QubitMap))],
+                        return_type: Box::new(Type::Vec(Box::new(Type::QubitMap))),
+                    },
+                },
+                Suggestion {
+                    completion_text: "is_empty".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Bool),
+                    },
+                },
+                Suggestion {
+                    completion_text: "contains".to_string(),
+                    completion_type: Type::Function {
+                        params: vec![Type::QubitMap],
+                        return_type: Box::new(Type::Bool),
+                    },
+                },
+                Suggestion {
+                    completion_text: "len".to_string(),
+                    completion_type: Type::Int,
+                }
+            ]
+        );
     }
 }

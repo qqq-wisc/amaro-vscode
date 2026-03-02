@@ -36,10 +36,6 @@ pub fn byte_to_position(text: &str, byte_idx: usize) -> (u32, u32) {
 /// Returns None if that position does not exist in the text.
 /// Returns Some if the position exists, with the char
 pub fn get_char_at(text: &str, position: Position) -> Option<char> {
-    if position.character == 0 && position.line == 0 {
-        return Some(text.chars().next().unwrap());
-    }
-
     let mut cur_line = 0;
     let mut cur_offset: Option<u32> = Some(0);
     for char in text.chars() {
@@ -65,9 +61,6 @@ pub fn get_char_at(text: &str, position: Position) -> Option<char> {
 
 /// Given an AmaroFile and a position, extracts the largest expression which
 /// contains that position, or errors if none found.
-/// This *might* be over-eager, in that it might consider a position as part of
-/// an expression that it's really not, since it checks ranges as
-/// [start, end] inclusive as opposed to [start, end) with exclusive end.
 pub fn largest_expr_containing(file: &AmaroFile, position: Position) -> Result<&Expr, String> {
     file.blocks
         .iter()
@@ -79,10 +72,9 @@ pub fn largest_expr_containing(file: &AmaroFile, position: Position) -> Result<&
                 .filter_map(|item| match item {
                     crate::ast::BlockItem::Field(field) => Some(field),
                     crate::ast::BlockItem::StructDef(_) => None,
-                    // TODO >= or just >  for end & position comparison?
                 })
                 .find(|field| {
-                    field.value_range.start <= position && field.value_range.end >= position
+                    field.value_range.start <= position && field.value_range.end > position
                 })
         })
         .map_or(

@@ -39,7 +39,7 @@ pub enum Type {
 
     // Struct types
     Struct {
-        // TODO unhappy with this. I feel the info is redundant..
+        // TODO work to merge UserDef and Struct into one.
         name: String,
         fields: HashMap<String, Type>,
     },
@@ -62,7 +62,7 @@ impl Type {
                 "Location" => Type::Location,
                 "Arch" => Type::ArchT,
                 "Gate" => Type::Gate,
-                "Instr" => Type::InstrT, // TODO this right?
+                "Instr" => Type::InstrT, // TODO determine if this is accurate
                 "Qubit" => Type::Qubit,
                 "QubitMap" => Type::QubitMap,
                 "State" => Type::StateT,
@@ -153,7 +153,7 @@ impl std::fmt::Display for Type {
             }
             Type::UserDef(name) => f.write_str(name),
             Type::Struct { name, .. } => f.write_str(name),
-            Type::Generic(c) => f.write_char('T').and(f.write_char(*c as char)),
+            Type::Generic(c) => write!(f, "T{}", c),
             Type::Unknown => f.write_char('?'),
         }
     }
@@ -184,7 +184,7 @@ impl UserDefTable {
     /// Given an AmaroFile, creates a UserDefTable which determines the fields
     /// of user-defined types.
     pub fn new(file: &crate::ast::AmaroFile) -> Self {
-        // TODO what if there are errors? need diagnostics?
+        // TODO work on adding diagnostics in the case of errors
         let mut map: HashMap<String, UserDefEntry> = HashMap::new();
 
         for block in &file.blocks {
@@ -211,6 +211,15 @@ impl UserDefTable {
         }
 
         UserDefTable { map }
+    }
+
+    /// Creates an empty UserDefTable. Useful if it is known that there are no
+    /// user-defined types.
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
     }
 
     /// Gets the fields of a user-defined type, if the type has a definition.
@@ -271,10 +280,7 @@ impl SymbolTable {
         scope.insert("step".to_string(), Type::Int);
         scope.insert(
             "Transition".to_string(),
-            Type::UserDef("Transition".to_string()), // Type::Struct {
-                                                     //     name: "Transition".to_string(),
-                                                     //     fields: HashMap::new(),
-                                                     // },
+            Type::UserDef("Transition".to_string()),
         );
         scope.insert(
             "GateRealization".to_string(),
@@ -480,7 +486,51 @@ pub fn field_lookup(field: &str) -> Option<Type> {
             params: vec![Type::QubitMap, Type::UserDef("Transition".to_string())],
             return_type: Box::new(Type::QubitMap),
         }),
-        "routed_gates" => Some(Type::Gate),
+        "routed_gates" => Some(Type::Vec(Box::new(Type::Gate))),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_field_lookup() {
+        assert_eq!(field_lookup("total garbage"), None);
+        assert_eq!(
+            field_lookup("cost"),
+            Some(Type::Function {
+                params: vec![Type::UserDef("Transition".to_string())],
+                return_type: Box::new(Type::Float),
+            })
+        );
+        assert_eq!(
+            field_lookup("realize_gate"),
+            Some(Type::Function {
+                params: vec![Type::ArchT, Type::StateT, Type::Gate],
+                return_type: Box::new(Type::Option(Box::new(Type::UserDef(
+                    "GateRealization".to_string(),
+                )))),
+            })
+        );
+        assert_eq!(
+            field_lookup("get_transitions"),
+            Some(Type::Function {
+                params: vec![Type::ArchT, Type::StateT],
+                return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))),
+            })
+        );
+        assert_eq!(
+            field_lookup("apply"),
+            Some(Type::Function {
+                params: vec![Type::QubitMap, Type::UserDef("Transition".to_string())],
+                return_type: Box::new(Type::QubitMap),
+            })
+        );
+        assert_eq!(
+            field_lookup("routed_gates"),
+            Some(Type::Vec(Box::new(Type::Gate)))
+        )
     }
 }

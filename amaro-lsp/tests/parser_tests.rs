@@ -1056,3 +1056,15 @@ fn test_complex_chaining() {
         }
     }
 }
+
+#[test]
+fn test_infer_bin_op() {
+    let input = r#"GateRealization[
+    routed_gates = CX
+    name = 'IonCNOT'
+]"#;
+
+    let file = parse_file(input).unwrap();
+    assert_eq!(file.blocks.len(), 1);
+    assert_eq!(file.blocks[0].kind, "GateRealization");
+}
