@@ -786,3 +786,50 @@ TransitionInfo:
         errors
     );
 }
+
+
+#[test]
+fn test_comparison_used_as_if_condition_no_error() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = if (1 > 0) then None else None
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "Comparison should be valid if condition. Got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_float_as_if_condition_still_errors() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = if 1.0 then None else None
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let has_error = diags
+        .iter()
+        .any(|d| d.message.to_lowercase().contains("bool"));
+    assert!(
+        has_error,
+        "Float as if-condition should still error after BinaryOp fix."
+    );
+}
