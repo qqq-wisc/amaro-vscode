@@ -909,3 +909,100 @@ TransitionInfo:
         "Accessing nonexistent field on known struct should warn."
     );
 }
+
+// Cost Field Type Enforcement Tests (Issue #4)
+
+#[test]
+fn test_cost_bool_rejected() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = true
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let has_cost_error = diags.iter().any(|d| {
+        d.message.contains("cost") && d.message.to_lowercase().contains("float")
+    });
+    assert!(
+        has_cost_error,
+        "Bool literal as cost should be rejected. Got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn test_cost_float_ok() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 1.5
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let cost_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("cost"))
+        .collect();
+    assert!(
+        cost_errors.is_empty(),
+        "Float cost should produce no errors. Got: {:?}",
+        cost_errors
+    );
+}
+
+#[test]
+fn test_cost_int_ok() {
+    // Int is compatible with Float per leniency rule → should pass
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let cost_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("cost"))
+        .collect();
+    assert!(
+        cost_errors.is_empty(),
+        "Int cost should be accepted (leniency). Got: {:?}",
+        cost_errors
+    );
+}
+
+#[test]
+fn test_cost_string_rejected() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 'oops'
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let has_cost_error = diags.iter().any(|d| {
+        d.message.contains("cost") && d.message.to_lowercase().contains("float")
+    });
+    assert!(
+        has_cost_error,
+        "String as cost should be rejected. Got: {:?}",
+        diags
+    );
+}
