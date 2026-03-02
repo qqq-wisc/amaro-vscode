@@ -1232,8 +1232,6 @@ TransitionInfo:
     );
 }
 
-// ── Issue #6: 'return' in field expression context ───────────────────────────
-
 #[test]
 fn test_return_in_field_produces_warning_not_missing_field_error() {
     // `apply = return []` — 'return' is not valid in expression context.
@@ -1325,8 +1323,6 @@ TransitionInfo:
     );
 }
 
-// ── Issue #9: Step context variable ──────────────────────────────────────────
-
 #[test]
 fn test_step_context_variable_resolves() {
     // Old-format files use 'Step' (capitalized) as the state context variable.
@@ -1378,8 +1374,6 @@ TransitionInfo:
         errors
     );
 }
-
-// ── Issue #3: Missing built-in functions ─────────────────────────────────────
 
 #[test]
 fn test_combinations_registered() {
@@ -1479,8 +1473,6 @@ TransitionInfo:
         undef_errors
     );
 }
-
-// Match Expression Tests (Issue #11)
 
 #[test]
 fn test_match_expression_no_errors() {
