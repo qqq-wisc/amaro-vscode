@@ -276,6 +276,8 @@ impl SymbolTable {
         scope.insert("Arch".to_string(), Type::ArchT);
         scope.insert("arch".to_string(), Type::ArchT);
         scope.insert("State".to_string(), Type::StateT);
+        // Old-format files use 'Step' (capitalized) as the state context variable.
+        scope.insert("Step".to_string(), Type::StateT);
         scope.insert("Gate".to_string(), Type::Gate);
         scope.insert("step".to_string(), Type::Int);
         scope.insert(
@@ -404,7 +406,11 @@ impl SymbolTable {
         scope.insert(
             "path".to_string(),
             Type::Function {
-                params: vec![],
+                params: vec![
+                    Type::Location,
+                    Type::Location,
+                    Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location]))),
+                ],
                 return_type: Box::new(Type::Vec(Box::new(Type::Location))),
             },
         );
@@ -448,6 +454,70 @@ impl SymbolTable {
                     Type::Vec(Box::new(Type::Location)),
                 ],
                 return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+            },
+        );
+
+        // Consistency check: validates a path is consistent with a qubit map
+        scope.insert(
+            "consistent".to_string(),
+            Type::Function {
+                params: vec![
+                    Type::Vec(Box::new(Type::Location)),
+                    Type::QubitMap,
+                ],
+                return_type: Box::new(Type::Bool),
+            },
+        );
+
+        // 2D adjacency conversion: converts edge list to adjacency lists
+        scope.insert(
+            "to_2d".to_string(),
+            Type::Function {
+                params: vec![
+                    Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location]))),
+                ],
+                return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))),
+            },
+        );
+
+        // k-combinations of a list (generic over element type)
+        scope.insert(
+            "combinations".to_string(),
+            Type::Function {
+                params: vec![Type::Vec(Box::new(Type::Unknown)), Type::Int],
+                return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Unknown))))),
+            },
+        );
+
+        // Numeric utilities
+        scope.insert(
+            "max".to_string(),
+            Type::Function {
+                params: vec![Type::Int, Type::Int],
+                return_type: Box::new(Type::Int),
+            },
+        );
+        scope.insert(
+            "min".to_string(),
+            Type::Function {
+                params: vec![Type::Int, Type::Int],
+                return_type: Box::new(Type::Int),
+            },
+        );
+        scope.insert(
+            "abs".to_string(),
+            Type::Function {
+                params: vec![Type::Int],
+                return_type: Box::new(Type::Int),
+            },
+        );
+
+        // Grid distance between two locations
+        scope.insert(
+            "dist".to_string(),
+            Type::Function {
+                params: vec![Type::Location, Type::Location],
+                return_type: Box::new(Type::Int),
             },
         );
     }
