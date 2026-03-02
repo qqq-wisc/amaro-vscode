@@ -118,7 +118,13 @@ fn parse_let_expr<'a>(
             ),
         ))
     } else {
-        parse_if_expr(original_input, input, ctx)
+        // Check for `match` expression before delegating to if/lambda/binary
+        let (_, is_match) = opt(peek(ws(parse_keyword("match"))))(input)?;
+        if is_match.is_some() {
+            parse_match_expr(original_input, input, ctx)
+        } else {
+            parse_if_expr(original_input, input, ctx)
+        }
     }
 }
 
@@ -633,6 +639,63 @@ fn parse_primary_expr<'a>(
         rest_after_id,
         Expr::identifier(id_str.to_string(), calc_range(original_input, start, len)),
     ))
+}
+
+fn parse_match_expr<'a>(
+    original_input: &'a str,
+    input: &'a str,
+    ctx: &mut ParseContext,
+) -> IResult<&'a str, Expr> {
+    let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
+
+    // Consume `match` keyword
+    let (input, _) = ws(parse_keyword("match"))(input)?;
+
+    // Parse scrutinee — any expression up to `with`
+    let (input, scrutinee) = parse_expr_with_context(original_input, input, ctx)?;
+
+    // Consume `with`
+    let (input, _) = ws(tag("with"))(input)?;
+
+    // Parse arms: `| pattern -> body`
+    let mut arms = Vec::new();
+    let mut current = input;
+    while let Ok((rest, _)) = ws(char('|'))(current) {
+        let (rest, pattern) = parse_match_pattern(rest)?;
+        let (rest, _) = ws(tag("->"))(rest)?;
+        let (rest, body) = parse_expr_with_context(original_input, rest, ctx)?;
+        arms.push(MatchArm { pattern, body });
+        current = rest;
+    }
+
+    if arms.is_empty() {
+        return Err(nom::Err::Error(Error::new(
+            current,
+            nom::error::ErrorKind::Many1,
+        )));
+    }
+
+    let end = current.as_ptr() as usize - original_input.as_ptr() as usize;
+    Ok((
+        current,
+        Expr::new(
+            ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            calc_range(original_input, start, end - start),
+        ),
+    ))
+}
+
+fn parse_match_pattern(input: &str) -> IResult<&str, MatchPattern> {
+    let (input, _) = whitespace_handler(input)?;
+    let (rest, name) = ws(parse_identifier)(input)?;
+    if name == "_" {
+        Ok((rest, MatchPattern::Wildcard))
+    } else {
+        Ok((rest, MatchPattern::Identifier(name.to_string())))
+    }
 }
 
 fn parse_number<'a>(original_input: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, Expr> {
