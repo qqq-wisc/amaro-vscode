@@ -390,7 +390,7 @@ fn parse_unary_expr<'a>(
     match op_parse {
         Ok((rest, op)) => {
             let (rest, operand) = parse_unary_expr(original_input, rest, ctx)?;
-            let end = operand.range.end.character as usize;
+            let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
             Ok((
                 rest,
                 Expr::new(
