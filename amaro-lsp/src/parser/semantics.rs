@@ -163,8 +163,9 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
                     range: expr.range,
                     severity: Some(DiagnosticSeverity::WARNING),
                     message: format!(
-                        "'{}' is not a recognized standard gate. Expected one of: {:?}",
-                        name, valid_gates
+                        "'{}' is not a recognized standard gate. Expected one of: {}",
+                        name,
+                        valid_gates.join(", ")
                     ),
                     ..Default::default()
                 });
@@ -341,10 +342,10 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                                 range: arg.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 message: format!(
-                                    "Argument {} expected type '{:?}' but got '{:?}'.",
+                                    "Argument {} expected type '{}' but got '{}'.",
                                     i + 1,
-                                    param_type,
-                                    arg_type
+                                    type_display(param_type),
+                                    type_display(&arg_type)
                                 ),
                                 ..Default::default()
                             });
@@ -427,6 +428,32 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         params: vec![],
                         return_type: Box::new(Type::Vec(Box::new(Type::Location))),
                     },
+
+                    // Trap topology (ion trap architectures)
+                    "trap_positions" => Type::Vec(Box::new(Type::Location)),
+                    "trap_vertices" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                    },
+                    "trap_edges" => Type::Vec(Box::new(Type::Tuple(vec![
+                        Type::Location,
+                        Type::Location,
+                    ]))),
+                    "locations" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                    },
+                    "edges_between" => Type::Function {
+                        params: vec![
+                            Type::Vec(Box::new(Type::Location)),
+                            Type::Vec(Box::new(Type::Location)),
+                        ],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![
+                            Type::Location,
+                            Type::Location,
+                        ])))),
+                    },
+
                     _ => Type::Unknown,
                 },
                 Type::StateT => {
@@ -511,8 +538,9 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     range: index.range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     message: format!(
-                        "Index type mismatch. Expected '{:?}' but got '{:?}'.",
-                        expected_idx_type, idx_type
+                        "Index type mismatch. Expected '{}' but got '{}'.",
+                        type_display(&expected_idx_type),
+                        type_display(&idx_type)
                     ),
                     ..Default::default()
                 });
@@ -697,6 +725,12 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
     inference_data.type_map.insert(expr.id, found_type.clone());
 
     found_type
+}
+
+/// Formats a Type for display in user-facing diagnostic messages.
+/// Delegates to the Display impl on Type (defined in symbols.rs).
+pub fn type_display(ty: &Type) -> String {
+    format!("{}", ty)
 }
 
 /// Comparisons are things like == or !=
