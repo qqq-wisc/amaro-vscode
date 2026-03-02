@@ -176,8 +176,9 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
                     range: expr.range,
                     severity: Some(DiagnosticSeverity::WARNING),
                     message: format!(
-                        "'{}' is not a recognized standard gate. Expected one of: {:?}",
-                        name, valid_gates
+                        "'{}' is not a recognized standard gate. Expected one of: {}",
+                        name,
+                        valid_gates.join(", ")
                     ),
                     ..Default::default()
                 });
@@ -347,10 +348,10 @@ pub fn infer_expr_type(
                                 range: arg.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 message: format!(
-                                    "Argument {} expected type '{:?}' but got '{:?}'.",
+                                    "Argument {} expected type '{}' but got '{}'.",
                                     i + 1,
-                                    param_type,
-                                    arg_type
+                                    type_display(param_type),
+                                    type_display(&arg_type)
                                 ),
                                 ..Default::default()
                             });
@@ -452,6 +453,32 @@ pub fn infer_expr_type(
                         params: vec![],
                         return_type: Box::new(Type::Vec(Box::new(Type::Location))),
                     },
+
+                    // Trap topology (ion trap architectures)
+                    "trap_positions" => Type::Vec(Box::new(Type::Location)),
+                    "trap_vertices" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                    },
+                    "trap_edges" => Type::Vec(Box::new(Type::Tuple(vec![
+                        Type::Location,
+                        Type::Location,
+                    ]))),
+                    "locations" => Type::Function {
+                        params: vec![],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+                    },
+                    "edges_between" => Type::Function {
+                        params: vec![
+                            Type::Vec(Box::new(Type::Location)),
+                            Type::Vec(Box::new(Type::Location)),
+                        ],
+                        return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![
+                            Type::Location,
+                            Type::Location,
+                        ])))),
+                    },
+
                     _ => Type::Unknown,
                 },
                 Type::StateT => {
@@ -527,8 +554,9 @@ pub fn infer_expr_type(
                     range: index.range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     message: format!(
-                        "Index type mismatch. Expected '{:?}' but got '{:?}'.",
-                        expected_idx_type, idx_type
+                        "Index type mismatch. Expected '{}' but got '{}'.",
+                        type_display(&expected_idx_type),
+                        type_display(&idx_type)
                     ),
                     ..Default::default()
                 });
@@ -614,6 +642,54 @@ pub fn infer_expr_type(
 
                 // Tensor product - domain-specific, type not enforced
                 BinaryOperator::Tensor => Type::Unknown,
+            }
+        }
+
+        ExprKind::UnaryOp { op, operand } => {
+            let operand_type = infer_expr_type(operand, sym_table, diagnostics);
+            match op {
+                UnaryOperator::Not => {
+                    if operand_type != Type::Unknown
+                        && !types_compatible(&operand_type, &Type::Bool)
+                    {
+                        diagnostics.push(Diagnostic {
+                            range: operand.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: format!(
+                                "'!' requires a Bool operand, got '{}'.",
+                                type_display(&operand_type)
+                            ),
+                            ..Default::default()
+                        });
+                    }
+                    Type::Bool
+                }
+                UnaryOperator::Neg => match &operand_type {
+                    Type::Int => Type::Int,
+                    Type::Float => Type::Float,
+                    Type::Unknown => Type::Unknown,
+                    _ => {
+                        diagnostics.push(Diagnostic {
+                            range: operand.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: format!(
+                                "Unary '-' requires a numeric operand (Int or Float), got '{}'.",
+                                type_display(&operand_type)
+                            ),
+                            ..Default::default()
+                        });
+                        Type::Unknown
+                    }
+                },
+            }
+        }
+
+        ExprKind::Projection { index, tuple } => {
+            let tuple_type = infer_expr_type(tuple, sym_table, diagnostics);
+            match tuple_type {
+                Type::Tuple(elements) => elements.get(*index).cloned().unwrap_or(Type::Unknown),
+                Type::Unknown => Type::Unknown,
+                _ => Type::Unknown,
             }
         }
 
