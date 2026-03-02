@@ -1061,6 +1061,79 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
     }
 }
 
+/// Suppose we have a type which includes some generics. For instance,
+/// map<I,O>(|O| -> I, Vec<I>) has two generics. We want to be able to infer
+/// what I and O are by looking at the generic type and the actual type.
+/// 
+/// Stops at first error. Could aggregate them if we wanted, but this should
+/// be sufficient for now.
+pub fn infer_generic_type(type_with_generics: &Type, actual_type: &Type, map: &mut HashMap<u8, Type>) -> Result<(), String> {
+    match type_with_generics {
+        Type::Generic(n) => {
+            // then, whatever actual_type is, that's what we put in as the
+            // mapping!
+            // ... unless it is unknown.
+            if let Type::Unknown = actual_type {
+                // don't add the mapping!
+                Ok(())
+            } else {
+
+                
+                match map.insert(*n, actual_type.clone()) {
+                    None => Ok(()),
+                    Some(t) => if t == *actual_type {
+                        Ok(())
+                    } else {
+                        Err("Multiple definitions for the generic.".to_string())
+                    }
+                }
+            }
+        },
+        Type::Vec(generic_inner) => {
+            if let Type::Vec(actual_inner) = actual_type {
+                infer_generic_type(generic_inner, actual_inner, map)
+            } else {
+                // TODO error?! need diagnostics too for error reporting
+                Err(format!("Generic expects Vec: {}, but actual did not have Vec and instead had: {}", type_with_generics, actual_type))
+            }
+        },
+        Type::Tuple(generic_items) => {
+            if let Type::Tuple(actual_items) = actual_type {
+                // TODO error if sizes are different
+                if generic_items.len() != actual_items.len() {
+                    Err(format!("Generic expects Tuple of size {}, but got Tuple of size {}.", generic_items.len(), actual_items.len()))
+                } else {
+                    generic_items.iter().zip(actual_items.iter()).try_fold((), |_, (generic, actual)| infer_generic_type(generic, actual, map))
+                }
+            } else {
+                // TODO error?! need diagnostics too for error reporting
+                Err(format!("Generic expects Tuple: {}, but actual did not have Tuple and instead had: {}", type_with_generics, actual_type))
+            }
+        },
+        Type::Option(generic_inner) => 
+            if let Type::Option(actual_inner) = actual_type {
+                infer_generic_type(generic_inner, actual_inner, map)
+            } else {
+                // TODO error?! need diagnostics too for error reporting
+                Err(format!("Generic expects Option: {}, but actual did not have Option and instead had: {}", type_with_generics, actual_type))
+            },
+        Type::Function { params: generic_params, return_type: generic_return } => 
+            if let Type::Function { params: actual_params, return_type: actual_return } = actual_type {
+                if generic_params.len() != actual_params.len() {
+                    Err(format!("Generic expects params to function of length {}, but got params to function of length {}.", generic_params.len(), actual_params.len()))
+                } else {
+                    generic_params.iter().zip(actual_params.iter()).try_fold((), |_, (generic, actual)| infer_generic_type(generic, actual, map)).and(infer_generic_type(generic_return, actual_return, map))
+                }
+                
+            } else {
+                Err(format!("Generic expects Function: {}, but actual did not have Function and instead had: {}", type_with_generics, actual_type))
+            }
+        ,
+        _ => Ok(())
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
