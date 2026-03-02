@@ -41,6 +41,15 @@ pub enum BlockContent {
 pub enum BlockItem {
     Field(Field),
     StructDef(StructDef),
+    /// A field whose value started with the `return` keyword.
+    /// Stored so `check_semantics` can emit a targeted warning and treat
+    /// the field as present (avoiding a spurious "missing required field" error).
+    ReturnKeyword {
+        /// The range of the `return` token itself.
+        range: Range,
+        /// The field key (e.g. `"apply"`).
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone)]
