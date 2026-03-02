@@ -706,6 +706,35 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             }
         }
         ExprKind::TensorProduct { .. } => Type::Unknown, // TODO what to do here?
+        ExprKind::Match { scrutinee, arms } => {
+            let _scrutinee_type = infer_expr_type(scrutinee, inference_data);
+
+            if arms.is_empty() {
+                return Type::Unknown;
+            }
+
+            let first_type = infer_expr_type(&arms[0].body, inference_data);
+            for arm in &arms[1..] {
+                let arm_type = infer_expr_type(&arm.body, inference_data);
+                if arm_type != Type::Unknown
+                    && first_type != Type::Unknown
+                    && !types_compatible(&arm_type, &first_type)
+                {
+                    inference_data.diagnostics.push(Diagnostic {
+                        range: arm.body.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        message: format!(
+                            "Match arm type '{}' is inconsistent with first arm type '{}'.",
+                            type_display(&arm_type),
+                            type_display(&first_type)
+                        ),
+                        ..Default::default()
+                    });
+                }
+            }
+
+            first_type
+        }
         ExprKind::Projection { index, tuple } => {
             // first, get type of the tuple
             let tuple_type = infer_expr_type(tuple, inference_data);
