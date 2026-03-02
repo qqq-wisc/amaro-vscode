@@ -4,6 +4,27 @@ All notable changes to the "amaro-vscode" extension will be documented in this f
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+## [1.0.3] - 2026-03-02
+
+### Added
+- **`match` Expression Support:** The parser now handles `match <expr> with | Pattern -> body` syntax. Type inference checks that all arms return consistent types and warns on mismatches. `match` and `with` are correctly reserved as keywords.
+- **Trap Topology Fields:** `ArchT` now recognizes `trap_positions`, `trap_vertices`, `trap_edges`, `locations`, and `edges_between` as valid fields, enabling trapped-ion architecture files to validate without false errors.
+- **Missing Built-in Functions:** Added `consistent`, `to_2d`, `combinations`, `max`, `min`, `abs`, and `dist` to the global symbol table. These were previously flagged as "Undefined variable" errors.
+- **`Step` Context Variable:** Registered `Step` (capitalized) as an alias for the state context variable, restoring compatibility with older-format `.qmrl` files.
+
+### Fixed
+- **BinaryOp Type Inference:** Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) now correctly return `Bool`. Arithmetic operators return the operand type (`Int` or `Float`). Previously all binary operations returned `Unknown`, allowing invalid conditions like `cost = (x > y)` to silently pass.
+- **UnaryOp Type Inference:** `!expr` now returns `Bool` (and errors if the operand is non-Bool). `-expr` returns `Int` or `Float` based on the operand. Both previously returned `Unknown`.
+- **Projection Type Inference:** Tuple projection (e.g., `edge.(0)`) now returns the type of the indexed element instead of `Unknown`.
+- **UnaryOp Range Overflow Panic:** Fixed a crash where `!x` and `-x` expressions caused a `usize` underflow panic due to a column number being incorrectly used as a byte offset when computing the diagnostic range.
+- **Struct Field Pre-pass:** The semantic checker now performs a pre-pass to register user-defined struct fields (e.g., `GateRealization{path : Vec<Location>}`) before type-checking expressions. Field accesses on user-defined structs now return the correct declared type instead of `Unknown`.
+- **`cost` Field Type Enforcement:** `TransitionInfo.cost` and `StateInfo.cost` now reject non-Float values. `Bool` and `String` values produce an error; `Int` is accepted with leniency.
+- **`return` Keyword Warning:** When a field value starts with `return` (invalid in Amaro's functional style), the extension now emits a targeted warning explaining the issue, rather than silently dropping the field and producing a misleading "missing required field" error downstream.
+- **Human-Readable Diagnostic Messages:** Error messages that previously showed Rust debug format (e.g., `Vec(Box(Location))`) now display proper type names (e.g., `Vec<Location>`).
+
+### Changed
+- **`path` Built-in Signature:** Corrected from 0 parameters to `path(Location, Location, Vec<(Location, Location)>) -> Vec<Location>`, matching its actual usage in example files.
+
 ## [1.0.2] - 2026-02-18
 
 ### Added

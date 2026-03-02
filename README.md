@@ -9,11 +9,14 @@ The LSP performs deep type inference and validation of your quantum routing logi
 
 * **QubitMap Indexing:** Correctly validates `State.map[Gate.qubits[0]]` - understands that `QubitMap` is indexed by `Qubit`, not `Int`.
 * **Unified Access:** Intelligently handles both property access (`State.map`) and functional access (`State.map()`), allowing for cleaner, more flexible code styles.
-* **Type Inference:** Infers types through nested expressions including `map`, `fold`, `let...in`, and `if-then-else`.
+* **Type Inference:** Infers types through nested expressions including `map`, `fold`, `let...in`, `if-then-else`, and `match` expressions.
 * **Smart Leniency:** Expressions of `Unknown` type (e.g. `x.implementation.(path())`) are accepted without false errors.
 * **Control Flow Validation:** Ensures type consistency across `if-then-else` branches and supports nested `let...in` bindings.
 * **Vector Operations:** Built-in support for standard vector methods (`push`, `pop`, `extend`) and tuple indexing (`edge.0`).
 * **Deep Type Checking:** Recursively validates generic types (e.g., `Vec<Vec<Location>>`) and custom Struct compatibility.
+* **Match Expressions:** Full parsing and type inference for `match … with | Pattern -> expr` syntax. Warns when arms return inconsistent types.
+* **`return` Keyword Detection:** Emits a clear warning when `return` is used in a field expression (invalid in Amaro's functional style), instead of silently dropping the field and producing a misleading "missing required field" error.
+* **Human-Readable Diagnostics:** All error messages use plain type names (e.g., `Vec<Location>`, not `Vec(Box(Location))`).
 
 
 ### Syntax Highlighting
@@ -40,12 +43,16 @@ A custom Rust-based Language Server (`amaro-lsp`) providing:
     * Full support for embedded Rust blocks `{{ ... }}`.
 
 ## Requirements
-Because this extension is currently in alpha, you must compile the language server manually:
-1. **Node.js & npm** - [nodejs.org](https://nodejs.org/en)
-2. **Rust Toolchain** - [rustup.rs](https://rustup.rs/)
 
-## Building & Running
-Clone the repository and build as follows:
+No build step required. Pre-compiled binaries for Windows, macOS, and Linux are bundled in the extension and selected automatically at startup.
+
+**For contributors** who want to modify or rebuild the language server:
+* **Node.js & npm** — [nodejs.org](https://nodejs.org/en)
+* **Rust Toolchain** — [rustup.rs](https://rustup.rs/)
+
+## Development
+
+To modify and test the extension locally, clone the repository and build as follows:
 ```bash
 # Install Node modules
 npm install
@@ -132,7 +139,7 @@ The `examples/` folder contains working `.qmrl` files demonstrating different qu
 See `examples/Readme.md` for detailed explanations.
 
 ## Known Issues
-* **LSP Binary Location:** The extension currently looks for the language server in `amaro-lsp/target/debug/amaro-lsp`. You **must** run `cargo build` inside the `amaro-lsp` folder before launching the extension.
+* **`match` in the compiler:** The extension fully supports `match` expressions for navigation and error checking. However, the Amaro compiler does not yet generate code for `match`. Use `if-then-else` in files intended for compilation.
 * **Type Checking:** The `gate_type()` return type is treated as `Gate` for comparison purposes; enum variants are not distinguished.
 
 
