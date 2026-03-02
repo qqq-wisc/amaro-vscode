@@ -4,7 +4,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while},
     character::complete::{char, digit1},
-    combinator::{map, opt, peek, recognize, value},
+    combinator::{map, opt, peek, recognize, value, verify},
     multi::{many0, separated_list0},
     sequence::{pair, terminated, tuple},
 };
@@ -50,6 +50,11 @@ impl ParseContext {
     }
 }
 
+/// Parses a keyword by its exact name with word-boundary checking.
+fn parse_keyword<'a>(kw: &'static str) -> impl FnMut(&'a str) -> IResult<&'a str, &'a str> {
+    move |input: &'a str| verify(parse_identifier, move |s: &str| s == kw)(input)
+}
+
 pub fn parse_expr<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, Expr> {
     let (input, _) = whitespace_handler(input)?;
 
@@ -78,7 +83,7 @@ fn parse_let_expr<'a>(
 
     // 1. Consume whitespace before 'let'
     let (input, _) = whitespace_handler(input)?;
-    let (input, is_let) = opt(tag("let"))(input)?;
+    let (input, is_let) = opt(parse_keyword("let"))(input)?;
 
     if is_let.is_some() {
         // 2. Whitespace after 'let'
@@ -94,7 +99,7 @@ fn parse_let_expr<'a>(
 
         // 4. Handle 'in' with whitespace around it
         let (input, _) = whitespace_handler(input)?;
-        let (input, _) = tag("in")(input)?;
+        let (input, _) = parse_keyword("in")(input)?;
         let (input, _) = whitespace_handler(input)?;
 
         let (input, body) = parse_expr_with_context(original_input, input, ctx)?;
@@ -126,7 +131,7 @@ fn parse_if_expr<'a>(
 
     // 1. Consume whitespace before 'if'
     let (input, _) = whitespace_handler(input)?;
-    let (input, is_if) = opt(tag("if"))(input)?;
+    let (input, is_if) = opt(parse_keyword("if"))(input)?;
 
     if is_if.is_some() {
         // 2. Whitespace after 'if'
@@ -135,14 +140,14 @@ fn parse_if_expr<'a>(
 
         // 3. Handle 'then' with whitespace around it
         let (input, _) = whitespace_handler(input)?;
-        let (input, _) = tag("then")(input)?;
+        let (input, _) = parse_keyword("then")(input)?;
         let (input, _) = whitespace_handler(input)?;
 
         let (input, then_branch) = parse_if_expr(original_input, input, ctx)?;
 
         // 4. Handle 'else' with whitespace around it
         let (input, _) = whitespace_handler(input)?;
-        let (input, _) = tag("else")(input)?;
+        let (input, _) = parse_keyword("else")(input)?;
         let (input, _) = whitespace_handler(input)?;
 
         let (input, else_branch) = parse_if_expr(original_input, input, ctx)?;
@@ -483,7 +488,13 @@ fn parse_postfix_expr<'a>(
         // Function call
         if let Ok((rest, _)) = ws(char('('))(current_input) {
             let (rest, args) = separated_list0(ws(char(',')), |i| {
-                parse_expr_with_context(original_input, i, ctx)
+                //parse_expr_with_context(original_input, i, ctx)
+                let (i, _) = whitespace_handler(i)?;
+                let arg_start = i.as_ptr() as usize - original_input.as_ptr() as usize;
+                let (i, mut expr) = parse_expr_with_context(original_input, i, ctx)?;
+                let arg_end = i.as_ptr() as usize - original_input.as_ptr() as usize;
+                expr.range = calc_range(original_input, arg_start, arg_end - arg_start);
+                Ok((i, expr))
             })(rest)?;
             let (rest, _) = ws(char(')'))(rest)?;
 
