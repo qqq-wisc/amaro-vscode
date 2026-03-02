@@ -92,11 +92,28 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
                     type_map: &mut type_map,
                     user_def_table: &user_def_table,
                 };
-                infer_expr_type(&field.value, &mut inf_data);
+                let field_type = infer_expr_type(&field.value, &mut inf_data);
 
                 // 3.1. Gate Validation in 'routed_gates' fields
                 if block_name == "RouteInfo" && field.key == "routed_gates" {
                     validate_gates(&field.value, &mut diagnostics);
+                }
+
+                // 3.2. Enforce Float type on 'cost' field
+                if field.key == "cost"
+                    && field_type != Type::Unknown
+                    && !types_compatible(&field_type, &Type::Float)
+                {
+                    diagnostics.push(Diagnostic {
+                        range: field.value.range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        message: format!(
+                            "'cost' must return Float, got '{}'. \
+                             Hint: Comparisons return Bool — use arithmetic instead.",
+                            field_type
+                        ),
+                        ..Default::default()
+                    });
                 }
             }
         }
