@@ -736,11 +736,13 @@ TransitionInfo:
 
 #[test]
 fn test_unknown_index_access_is_lenient() {
+    // x.implementation is Unknown (not a known Gate field).
+    // Projection/index into Unknown should be lenient — no error.
     let input = r#"
 RouteInfo:
     routed_gates = CX
     GateRealization{path : Vec()}
-    realize_gate = map(|x| -> x.implementation.(path()), State.implemented_gates())
+    realize_gate = map(|x| -> x.implementation.(0), State.implemented_gates())
 TransitionInfo:
     get_transitions = []
     apply = []
@@ -1226,6 +1228,161 @@ TransitionInfo:
     assert!(
         undef_errors.is_empty(),
         "Arch.trap_vertices() should resolve without errors. Got: {:?}",
+        undef_errors
+    );
+}
+
+// ── Issue #9: Step context variable ──────────────────────────────────────────
+
+#[test]
+fn test_step_context_variable_resolves() {
+    // Old-format files use 'Step' (capitalized) as the state context variable.
+    // Step should resolve to StateT; Step.map, Step.gates etc. should not error.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = Step.gates()
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef_step: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined variable") && d.message.contains("Step"))
+        .collect();
+    assert!(
+        undef_step.is_empty(),
+        "'Step' should resolve as StateT. Got: {:?}",
+        undef_step
+    );
+}
+
+#[test]
+fn test_step_lowercase_still_works() {
+    // 'step' (lowercase) is the step counter (Int) — used in arithmetic should not error.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    // No errors should occur in a valid file — 'step' being Int is an internal guarantee
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "Valid file should produce no errors. Got: {:?}",
+        errors
+    );
+}
+
+// ── Issue #3: Missing built-in functions ─────────────────────────────────────
+
+#[test]
+fn test_combinations_registered() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = combinations([], 2)
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined variable"))
+        .collect();
+    assert!(
+        undef_errors.is_empty(),
+        "'combinations' should be registered as a built-in. Got: {:?}",
+        undef_errors
+    );
+}
+
+#[test]
+fn test_max_min_abs_registered() {
+    // max, min, abs should resolve without "Undefined variable" errors.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = max(min(1, 2), abs(0))
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined variable"))
+        .collect();
+    assert!(
+        undef.is_empty(),
+        "max, min, abs should be registered built-ins. Got: {:?}",
+        undef
+    );
+}
+
+#[test]
+fn test_consistent_and_to_2d_registered() {
+    // consistent and to_2d should resolve without "Undefined variable" errors.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = consistent([], State.map())
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined variable 'consistent'"))
+        .collect();
+    assert!(
+        undef.is_empty(),
+        "'consistent' should be registered as a built-in. Got: {:?}",
+        undef
+    );
+}
+
+#[test]
+fn test_missing_builtins_no_undefined_error() {
+    // All previously-missing built-ins should resolve without "Undefined variable" errors.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = combinations([], 2)
+    apply = []
+    cost = max(0, abs(0))
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined variable"))
+        .collect();
+    assert!(
+        undef_errors.is_empty(),
+        "No undefined variable errors expected for registered built-ins. Got: {:?}",
         undef_errors
     );
 }
