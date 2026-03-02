@@ -466,6 +466,7 @@ TransitionInfo:
                 BlockItem::StructDef(struct_def) => {
                     ids.insert(struct_def.id);
                 }
+                BlockItem::ReturnKeyword { .. } => {}
             }
         }
     }

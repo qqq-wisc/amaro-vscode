@@ -54,6 +54,16 @@ pub fn build_document_symbols(file: &AmaroFile) -> Vec<DocumentSymbol> {
                             selection_range: struct_def.name_range,
                             children: None,
                         },
+                        BlockItem::ReturnKeyword { range, key } => DocumentSymbol {
+                            name: key.clone(),
+                            detail: Some("(invalid: 'return' in expression context)".to_string()),
+                            kind: SymbolKind::FIELD,
+                            tags: None,
+                            deprecated: None,
+                            range: *range,
+                            selection_range: *range,
+                            children: None,
+                        },
                     })
                     .collect(),
             };
@@ -149,6 +159,12 @@ fn format_simple_ast(file: &AmaroFile) -> String {
                                 s.name,
                                 struct_pos.line + 1,
                                 struct_pos.character
+                            ));
+                        }
+                        BlockItem::ReturnKeyword { key, .. } => {
+                            output.push_str(&format!(
+                                "  ReturnKeyword: {} = return ... (invalid)\n",
+                                key
                             ));
                         }
                     }

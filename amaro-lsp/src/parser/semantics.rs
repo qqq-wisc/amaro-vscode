@@ -83,6 +83,24 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
         let mut present_keys: Vec<&str> = Vec::new();
         let BlockContent::Fields(items) = &block.content;
         for item in items {
+            if let BlockItem::ReturnKeyword { range, key } = item {
+                // The field was parsed but its value started with `return`, which is
+                // not valid in expression context. Emit a targeted warning and mark
+                // the field as present so "missing required field" is not also raised.
+                present_keys.push(key.as_str());
+                diagnostics.push(Diagnostic {
+                    range: *range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    message: format!(
+                        "'return' is not valid in field expression context (field '{}').\n\
+                         Amaro uses functional style — remove 'return' and write the expression directly.",
+                        key
+                    ),
+                    ..Default::default()
+                });
+                continue;
+            }
+
             if let BlockItem::Field(field) = item {
                 present_keys.push(field.key.as_str());
 
