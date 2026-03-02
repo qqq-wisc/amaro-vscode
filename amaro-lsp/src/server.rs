@@ -118,6 +118,10 @@ fn format_expr_preview(expr: &Expr) -> String {
 
         ExprKind::Some(_) => "Some(...)".to_string(),
         ExprKind::None => "None".to_string(),
+
+        ExprKind::Match { scrutinee, arms } => {
+            format!("match {} with ({} arms)", format_expr_preview(scrutinee), arms.len())
+        }
     }
 }
 
@@ -354,6 +358,14 @@ fn summarize_expr_detailed(expr: &Expr, depth: usize) -> String {
                 "{} ⊗ {}",
                 summarize_expr_detailed(left, depth + 1),
                 summarize_expr_detailed(right, depth + 1)
+            )
+        }
+
+        ExprKind::Match { scrutinee, arms } => {
+            format!(
+                "match {} with {} arms",
+                summarize_expr_detailed(scrutinee, depth + 1),
+                arms.len()
             )
         }
     }

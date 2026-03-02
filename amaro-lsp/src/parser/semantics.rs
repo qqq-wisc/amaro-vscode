@@ -711,6 +711,39 @@ pub fn infer_expr_type(
             }
         }
 
+        ExprKind::Match { scrutinee, arms } => {
+            // Infer scrutinee type (available for future exhaustiveness checking)
+            let _scrutinee_type = infer_expr_type(scrutinee, sym_table, diagnostics);
+
+            if arms.is_empty() {
+                return Type::Unknown;
+            }
+
+            // The match expression's type is the type of the first arm's body.
+            // Warn if later arms have an incompatible type.
+            let first_type = infer_expr_type(&arms[0].body, sym_table, diagnostics);
+            for arm in &arms[1..] {
+                let arm_type = infer_expr_type(&arm.body, sym_table, diagnostics);
+                if arm_type != Type::Unknown
+                    && first_type != Type::Unknown
+                    && !types_compatible(&arm_type, &first_type)
+                {
+                    diagnostics.push(Diagnostic {
+                        range: arm.body.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        message: format!(
+                            "Match arm type '{}' is inconsistent with first arm type '{}'.",
+                            type_display(&arm_type),
+                            type_display(&first_type)
+                        ),
+                        ..Default::default()
+                    });
+                }
+            }
+
+            first_type
+        }
+
         _ => Type::Unknown,
     }
 }
