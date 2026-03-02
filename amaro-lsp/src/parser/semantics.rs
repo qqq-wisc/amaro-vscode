@@ -500,6 +500,64 @@ pub fn infer_expr_type(
             }
         }
 
+        ExprKind::BinaryOp { op, left, right } => {
+            let left_type = infer_expr_type(left, sym_table, diagnostics);
+            let right_type = infer_expr_type(right, sym_table, diagnostics);
+
+            match op {
+                // Comparison operators always return Bool
+                BinaryOperator::Eq
+                | BinaryOperator::Ne
+                | BinaryOperator::Lt
+                | BinaryOperator::Le
+                | BinaryOperator::Gt
+                | BinaryOperator::Ge => Type::Bool,
+
+                // Logical operators expect Bool inputs, return Bool
+                BinaryOperator::And | BinaryOperator::Or => {
+                    for (ty, operand) in
+                        [(&left_type, left.as_ref()), (&right_type, right.as_ref())]
+                    {
+                        if *ty != Type::Unknown && !types_compatible(ty, &Type::Bool) {
+                            diagnostics.push(Diagnostic {
+                                range: operand.range,
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                message: format!(
+                                    "Logical operator requires Bool operands, got '{}'.",
+                                    type_display(ty)
+                                ),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    Type::Bool
+                }
+
+                // Arithmetic operators: return the "wider" type of the two operands.
+                // Location overloads (+, -, *, /) are allowed (Location op Int → Location).
+                BinaryOperator::Add
+                | BinaryOperator::Sub
+                | BinaryOperator::Mul
+                | BinaryOperator::Div
+                | BinaryOperator::Mod => match (&left_type, &right_type) {
+                    (Type::Location, Type::Int) | (Type::Location, Type::Unknown) => {
+                        Type::Location
+                    }
+                    (Type::Int, Type::Location) => Type::Location,
+                    (Type::Float, _) | (_, Type::Float) => Type::Float,
+                    (Type::Int, Type::Int) => Type::Int,
+                    (Type::Unknown, _) | (_, Type::Unknown) => Type::Unknown,
+                    _ => Type::Unknown,
+                },
+
+                // Range produces a Vec<Int>
+                BinaryOperator::Range => Type::Vec(Box::new(Type::Int)),
+
+                // Tensor product - domain-specific, type not enforced
+                BinaryOperator::Tensor => Type::Unknown,
+            }
+        }
+
         _ => Type::Unknown,
     }
 }
@@ -562,6 +620,40 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
         }
 
         _ => false,
+    }
+}
+
+/// Formats a Type for display in user-facing diagnostic messages.
+/// Uses Amaro type syntax (Vec<T>, Option<T>, (A, B)) rather than Rust debug format.
+pub fn type_display(ty: &Type) -> String {
+    match ty {
+        Type::Int => "Int".to_string(),
+        Type::Float => "Float".to_string(),
+        Type::Bool => "Bool".to_string(),
+        Type::String => "String".to_string(),
+        Type::Location => "Location".to_string(),
+        Type::Qubit => "Qubit".to_string(),
+        Type::QubitMap => "QubitMap".to_string(),
+        Type::Gate => "Gate".to_string(),
+        Type::ArchT => "Arch".to_string(),
+        Type::StateT => "State".to_string(),
+        Type::InstrT => "Instr".to_string(),
+        Type::Vec(inner) => format!("Vec<{}>", type_display(inner)),
+        Type::Option(inner) => format!("Option<{}>", type_display(inner)),
+        Type::Tuple(items) => format!(
+            "({})",
+            items.iter().map(type_display).collect::<Vec<_>>().join(", ")
+        ),
+        Type::Struct { name, .. } => name.clone(),
+        Type::Function {
+            params,
+            return_type,
+        } => format!(
+            "({}) -> {}",
+            params.iter().map(type_display).collect::<Vec<_>>().join(", "),
+            type_display(return_type)
+        ),
+        Type::Unknown => "Unknown".to_string(),
     }
 }
 
