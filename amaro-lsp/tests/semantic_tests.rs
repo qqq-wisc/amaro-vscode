@@ -834,8 +834,6 @@ TransitionInfo:
     );
 }
 
-// Struct Field Pre-Pass Tests (Issue #2)
-
 #[test]
 fn test_struct_prepass_wrong_type_caught() {
     // Transition.edge is Tuple(Location, Location), not Location.
@@ -910,8 +908,6 @@ TransitionInfo:
         "Accessing nonexistent field on known struct should warn."
     );
 }
-
-// Cost Field Type Enforcement Tests (Issue #4)
 
 #[test]
 fn test_cost_bool_rejected() {
@@ -1005,5 +1001,231 @@ TransitionInfo:
         has_cost_error,
         "String as cost should be rejected. Got: {:?}",
         diags
+    );
+}
+
+#[test]
+fn test_arg_type_mismatch_uses_friendly_format() {
+    // map expects a Function as first arg; passing an Int triggers a type mismatch.
+    // The message should NOT contain Rust debug artifacts like "Box(" or "Function { params: [".
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = map(1, [])
+    apply = []
+    cost = 1.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let has_debug_artifact = diags.iter().any(|d| d.message.contains("Box("));
+    assert!(
+        !has_debug_artifact,
+        "Diagnostic messages should not contain Rust debug format artifacts. Got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn test_index_mismatch_message_no_debug_artifacts() {
+    // Valid file — just verifies no Box( artifacts appear in any diagnostic.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 1.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let has_debug_artifact = diags.iter().any(|d| d.message.contains("Box("));
+    assert!(
+        !has_debug_artifact,
+        "Diagnostic messages should not contain Rust debug format artifacts. Got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn test_unary_not_on_bool_ok() {
+    // !false → Bool; used as if condition → no error
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = if !false then [] else []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 1.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "!false should be valid Bool. Got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_unary_neg_int_ok() {
+    // -1 → Int; valid as cost (Int compatible with Float)
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = -1
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "Negative int literal as cost should be valid. Got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_projection_on_tuple_resolves() {
+    // Transition{edge : (Location, Location)} → Transition.edge.(0) → Location
+    // Should not produce an "Undefined variable" error for Transition.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 1.0
+
+GateRealization:
+    Transition{edge : (Location, Location)}
+    data = Transition.edge.(0)
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined variable 'Transition'"))
+        .collect();
+    assert!(
+        undef.is_empty(),
+        "Transition.edge.(0) should resolve after pre-pass + Projection fix. Got: {:?}",
+        undef
+    );
+}
+
+#[test]
+fn test_arch_trap_positions_resolves() {
+    // Arch.trap_positions should resolve to Vec<Location>, not produce "Undefined variable 'Arch'"
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = Arch.trap_positions
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef_arch: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined variable 'Arch'"))
+        .collect();
+    assert!(
+        undef_arch.is_empty(),
+        "Arch.trap_positions should resolve — 'Arch' should not be undefined. Got: {:?}",
+        undef_arch
+    );
+}
+
+#[test]
+fn test_arch_trap_edges_resolves() {
+    // Arch.trap_edges should resolve to Vec<(Location, Location)>, not Unknown or error.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = Arch.trap_edges
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef_arch: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined variable 'Arch'"))
+        .collect();
+    assert!(
+        undef_arch.is_empty(),
+        "Arch.trap_edges should resolve — 'Arch' should not be undefined. Got: {:?}",
+        undef_arch
+    );
+}
+
+#[test]
+fn test_arch_locations_resolves() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = all_paths(Arch, Arch.locations(), [], [])
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined") || d.message.contains("non-function"))
+        .collect();
+    assert!(
+        undef_errors.is_empty(),
+        "Arch.locations() should resolve. Got: {:?}",
+        undef_errors
+    );
+}
+
+#[test]
+fn test_arch_trap_vertices_resolves() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+ArchInfo:
+    trap_zones = Arch.trap_vertices()
+
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let undef_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Undefined") || d.message.contains("non-function"))
+        .collect();
+    assert!(
+        undef_errors.is_empty(),
+        "Arch.trap_vertices() should resolve without errors. Got: {:?}",
+        undef_errors
     );
 }
