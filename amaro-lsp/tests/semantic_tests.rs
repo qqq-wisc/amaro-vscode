@@ -1232,6 +1232,99 @@ TransitionInfo:
     );
 }
 
+// ── Issue #6: 'return' in field expression context ───────────────────────────
+
+#[test]
+fn test_return_in_field_produces_warning_not_missing_field_error() {
+    // `apply = return []` — 'return' is not valid in expression context.
+    // Should emit a WARNING about 'return', NOT a "missing required field: apply" error.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = return []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+
+    let missing_apply = diags.iter().any(|d| {
+        d.message.contains("missing required field") && d.message.contains("apply")
+    });
+    let return_warning = diags
+        .iter()
+        .any(|d| d.message.to_lowercase().contains("return"));
+
+    assert!(
+        !missing_apply,
+        "'apply' should not be reported as missing — got: {:?}",
+        diags
+    );
+    assert!(
+        return_warning,
+        "Should emit a warning about 'return' in expression context. Got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn test_return_warning_is_warning_not_error() {
+    // The diagnostic for 'return' should be a WARNING, not an ERROR.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = return []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+
+    let return_diag = diags
+        .iter()
+        .find(|d| d.message.to_lowercase().contains("return"));
+
+    assert!(
+        return_diag.is_some(),
+        "Should have a diagnostic about 'return'. Got: {:?}",
+        diags
+    );
+    assert_eq!(
+        return_diag.unwrap().severity,
+        Some(DiagnosticSeverity::WARNING),
+        "'return' diagnostic should be a WARNING, not an error"
+    );
+}
+
+#[test]
+fn test_return_does_not_affect_valid_fields() {
+    // A file where no 'return' is used should be completely unaffected.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    get_transitions = []
+    apply = []
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "Valid file with no 'return' should produce no errors. Got: {:?}",
+        errors
+    );
+}
+
 // ── Issue #9: Step context variable ──────────────────────────────────────────
 
 #[test]
