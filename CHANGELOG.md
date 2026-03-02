@@ -4,7 +4,7 @@ All notable changes to the "amaro-vscode" extension will be documented in this f
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
-## [1.0.3] - 2026-02-26
+## [1.0.3] - 2026-02-27
 
 ### Added
 - **Autocomplete:** Typing a '.' after some types will provide autocomplete options. For instance, typing `Arch.` shows the fields and functions on `Arch`.
