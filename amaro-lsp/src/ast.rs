@@ -170,6 +170,12 @@ pub enum ExprKind {
     Some(Box<Expr>),
     None,
 
+    // Match expression
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
+
     // Amaro-specific operators
     TensorProduct {
         left: Box<Expr>,
@@ -241,6 +247,24 @@ pub enum BinaryOperator {
 pub enum UnaryOperator {
     Not,
     Neg,
+}
+
+/// A single arm of a `match` expression: `| Pattern -> body`.
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Expr,
+}
+
+/// A pattern in a `match` arm.
+#[derive(Debug, Clone)]
+pub enum MatchPattern {
+    /// A named pattern, e.g. `CX` or `Pauli`.
+    Identifier(String),
+    /// The wildcard `_` — matches anything.
+    Wildcard,
+    /// A tuple pattern, e.g. `(A, B)`.
+    Tuple(Vec<MatchPattern>),
 }
 
 impl Expr {

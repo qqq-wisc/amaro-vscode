@@ -97,6 +97,8 @@ pub fn is_keyword(s: &str) -> bool {
             | "None"
             | "where"
             | "return"
+            | "match"
+            | "with"
     )
 }
 
