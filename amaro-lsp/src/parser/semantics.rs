@@ -78,6 +78,30 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
         let mut sym_table = SymbolTable::new();
         let mut present_keys: Vec<&str> = Vec::new();
         let BlockContent::Fields(items) = &block.content;
+
+        // Pre-pass: register user-defined struct field types in the symbol table.
+        // This allows Transition.edge, GateRealization.path, etc. to resolve correctly
+        // before the field expressions that reference them are evaluated.
+        for item in items {
+            if let BlockItem::StructDef(struct_def) = item {
+                let mut field_map = HashMap::new();
+                for param in &struct_def.fields {
+                    field_map.insert(
+                        param.name.clone(),
+                        type_annotation_to_type(&param.type_annotation),
+                    );
+                }
+                // Override the built-in empty struct with the user-declared fields
+                sym_table.bind(
+                    struct_def.name.clone(),
+                    Type::Struct {
+                        name: struct_def.name.clone(),
+                        fields: field_map,
+                    },
+                );
+            }
+        }
+
         for item in items {
             if let BlockItem::Field(field) = item {
                 present_keys.push(field.key.as_str());
@@ -365,7 +389,25 @@ pub fn infer_expr_type(
                         Type::Unknown
                     }
                 }
-                Type::Struct { fields, .. } => fields.get(field).cloned().unwrap_or(Type::Unknown),
+                Type::Struct { name, fields } => match fields.get(field) {
+                    Some(ty) => ty.clone(),
+                    None => {
+                        // Only warn if the struct has known fields (pre-pass populated it).
+                        // Empty fields means the built-in stub — no false positives.
+                        if !fields.is_empty() {
+                            diagnostics.push(Diagnostic {
+                                range: expr.range,
+                                severity: Some(DiagnosticSeverity::WARNING),
+                                message: format!(
+                                    "No field `{}` on struct `{}`.",
+                                    field, name
+                                ),
+                                ..Default::default()
+                            });
+                        }
+                        Type::Unknown
+                    }
+                },
                 Type::Tuple(elements) => {
                     if let Ok(idx) = field.parse::<usize>() {
                         elements.get(idx).cloned().unwrap_or(Type::Unknown)
@@ -620,6 +662,40 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
         }
 
         _ => false,
+    }
+}
+
+/// Converts a parsed TypeAnnotation (from struct field declarations) to a runtime Type.
+fn type_annotation_to_type(ann: &TypeAnnotation) -> Type {
+    match ann {
+        TypeAnnotation::Simple(name) => match name.as_str() {
+            "Location" => Type::Location,
+            "Int" => Type::Int,
+            "Float" => Type::Float,
+            "Bool" => Type::Bool,
+            "Qubit" => Type::Qubit,
+            "QubitMap" => Type::QubitMap,
+            "Gate" => Type::Gate,
+            _ => Type::Unknown,
+        },
+        TypeAnnotation::Generic(name, args) if name == "Vec" => {
+            let inner = args
+                .first()
+                .map(type_annotation_to_type)
+                .unwrap_or(Type::Unknown);
+            Type::Vec(Box::new(inner))
+        }
+        TypeAnnotation::Generic(name, args) if name == "Option" => {
+            let inner = args
+                .first()
+                .map(type_annotation_to_type)
+                .unwrap_or(Type::Unknown);
+            Type::Option(Box::new(inner))
+        }
+        TypeAnnotation::Tuple(items) => {
+            Type::Tuple(items.iter().map(type_annotation_to_type).collect())
+        }
+        _ => Type::Unknown,
     }
 }
 

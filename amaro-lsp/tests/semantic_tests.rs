@@ -832,3 +832,80 @@ TransitionInfo:
         "Float as if-condition should still error after BinaryOp fix."
     );
 }
+
+// Struct Field Pre-Pass Tests (Issue #2)
+
+#[test]
+fn test_struct_prepass_wrong_type_caught() {
+    // Transition.edge is Tuple(Location, Location), not Location.
+    // value_swap(Location, Location) should error when given Tuple as first arg.
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    Transition{edge : (Location, Location)}
+    get_transitions = []
+    apply = value_swap(Transition.edge, Location(0))
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let has_type_error = diags
+        .iter()
+        .any(|d| d.severity == Some(DiagnosticSeverity::ERROR));
+    assert!(
+        has_type_error,
+        "Passing Tuple where Location expected should error after pre-pass."
+    );
+}
+
+#[test]
+fn test_struct_prepass_correct_usage_no_error() {
+    // Transition.edge.(0) should be Location → value_swap(Location, Location) → OK
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    Transition{edge : (Location, Location)}
+    get_transitions = []
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "Correct Transition.edge.(0) usage should produce no errors. Got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_struct_prepass_unknown_field_warns() {
+    let input = r#"
+RouteInfo:
+    routed_gates = CX
+    realize_gate = []
+TransitionInfo:
+    Transition{edge : (Location, Location)}
+    get_transitions = []
+    apply = Transition.nonexistent
+    cost = 0.0
+"#;
+    let file = parse_file(input).unwrap();
+    let diags = check_semantics(&file);
+    let has_field_warning = diags.iter().any(|d| {
+        d.message.to_lowercase().contains("nonexistent")
+            || d.message.to_lowercase().contains("no field")
+    });
+    assert!(
+        has_field_warning,
+        "Accessing nonexistent field on known struct should warn."
+    );
+}
