@@ -130,7 +130,7 @@ impl std::fmt::Display for Type {
                     }
                 }
                 f.write_char(')')
-            } // make this pleasant..
+            }
             Type::Option(inner) => f
                 .write_str("Option<")
                 .and(inner.fmt(f))
@@ -284,10 +284,7 @@ impl SymbolTable {
         );
         scope.insert(
             "GateRealization".to_string(),
-            Type::UserDef("GateRealization".to_string()), // Type::Struct {
-                                                          //     name: "GateRealization".to_string(),
-                                                          //     fields: HashMap::new(),
-                                                          // },
+            Type::UserDef("GateRealization".to_string()), 
         );
     }
 

@@ -590,7 +590,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 }
 
                 BinaryOperator::And | BinaryOperator::Or => match (&left_type, &right_type) {
-                    (Type::Bool, Type::Bool) => Type::Bool,
+                    (Type::Unknown | Type::Bool, Type::Bool | Type::Unknown) => Type::Bool,
                     (_, _) => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -615,6 +615,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             match op {
                 UnaryOperator::Not => match operand_type {
                     Type::Bool => Type::Bool,
+                    Type::Unknown => Type::Unknown,
                     _ => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -628,6 +629,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 UnaryOperator::Neg => match operand_type {
                     Type::Int => Type::Int,
                     Type::Float => Type::Float,
+                    Type::Unknown => Type::Unknown,
                     _ => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
