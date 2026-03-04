@@ -1076,6 +1076,9 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
 /// 
 /// Stops at first error. Could aggregate them if we wanted, but this should
 /// be sufficient for now.
+/// 
+/// TODO: Returning the string is good for readability, however this make the fcn HEAVY when used
+/// on things that we aren't sure will match.
 pub fn infer_generic_type(type_with_generics: &Type, actual_type: &Type, map: &mut HashMap<u8, Type>) -> Result<(), String> {
     match type_with_generics {
         Type::Generic(n) => {
@@ -1138,7 +1141,35 @@ pub fn infer_generic_type(type_with_generics: &Type, actual_type: &Type, map: &m
                 Err(format!("Generic expects Function: {}, but actual did not have Function and instead had: {}", type_with_generics, actual_type))
             }
         ,
-        _ => Ok(())
+        _ => if type_with_generics == actual_type {
+            Ok(())
+        } else {
+            Err("Types did not match".to_string())
+        }
+    }
+}
+
+/// Given a type that we know has generics, and a generic map which maps from
+/// the generic IDs to their actual types, reconstructs the actual type by
+/// substituting in the generics with the types in the map. If a generic is not
+/// found, then an error is provided with the ID of the not found generic.
+pub fn degenerisize(type_with_generics: &Type, generic_map: &HashMap<u8, Type>) -> Result<Type, u8> {
+    match type_with_generics {
+        Type::Generic(c) => {
+            match generic_map.get(c) {
+                Some(t) => Ok(t.clone()),
+                None => Err(*c),
+            }
+        },
+        Type::Vec(inner) => Ok(Type::Vec(Box::new(degenerisize(inner, generic_map)?))),
+        Type::Tuple(items) => Ok(Type::Tuple(items.iter().map(|elt| degenerisize(elt, generic_map)).collect::<Result<Vec<_>,_>>()?)),
+        Type::Option(inner) => Ok(Type::Option(Box::new(degenerisize(inner, generic_map)?))),
+        Type::Function { params, return_type } => Ok(Type::Function { 
+            params: params.iter().map(|elt| degenerisize(elt, generic_map)).collect::<Result<Vec<_>,_>>()?, 
+            return_type: Box::new(degenerisize(return_type, generic_map)?)
+        }),
+        Type::Unknown => Ok(Type::Unknown),
+        _ => Ok(type_with_generics.clone())
     }
 }
 
