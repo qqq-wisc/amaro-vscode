@@ -1,5 +1,8 @@
-// place for defining built-in functions. this means "raw" functions like map,
-// but also functions like .contains
+// place for defining built-in keywords and functions. this means "raw" functions like 
+// map, but also functions like .contains on a vec. also just types too, like Arch.
+// the SymbolTable should derive from this, along with everything else.
+// no hard-coding should take place except for in here.
+// then, if later plans change about the types, only this needs to be modified.
 
 use crate::parser::{semantics, symbols::Type};
 use std::{collections::HashMap, sync::OnceLock};
@@ -9,7 +12,8 @@ pub enum Owner<'a, T> {
     Borrowed(&'a T)
 }
 
-
+/// Global, persistent location where the built-ins are kept. They do not change
+/// between different files.
 static GLOBAL: OnceLock<Vec<(Option<Type>, Vec<BuiltIn>)>> = OnceLock::new();
 
 
@@ -128,6 +132,51 @@ pub fn check_built_in_after_type<'a>(t1: &Type, identifier: &str) -> Option<Owne
 fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
     let mut map = Vec::new();
     map.push((None, vec![
+        // type keywords
+        BuiltIn {
+            parent_type: None,
+            identifier: "Arch".to_string(),
+            typ: Type::ArchT,
+            details: "Architecture type.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "arch".to_string(),
+            typ: Type::ArchT,
+            details: "Architecture type.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "State".to_string(),
+            typ: Type::StateT,
+            details: "State type.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Gate".to_string(),
+            typ: Type::Gate,
+            details: "Gate type.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "step".to_string(),
+            typ: Type::Int,
+            details: "Step type. Alias for Int".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Transition".to_string(),
+            typ: Type::UserDef("Transition".to_string()),
+            details: "Transition type. Fields defined by user.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "GateRealization".to_string(),
+            typ: Type::UserDef("GateRealization".to_string()),
+            details: "Step type. Alias for Int".to_string()
+        },
+
+
         // constructors
         BuiltIn {
             parent_type: None,
