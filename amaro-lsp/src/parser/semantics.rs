@@ -712,7 +712,7 @@ fn types_math(t1: &Type, t2: &Type) -> Option<Type> {
 
         // if first type is one of the other math-y types, then we can do a math
         // op if the other type is an int, or just if the two types are equal
-        Type::Float | Type::Bool | Type::Location | Type::Qubit => {
+        Type::Float | Type::Location | Type::Qubit => {
             if matches!(t2, Type::Int) || t1 == t2 {
                 Some(t1.clone())
             } else {
