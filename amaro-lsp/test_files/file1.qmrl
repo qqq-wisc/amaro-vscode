@@ -6,7 +6,7 @@ GateRealization[
 
 Transition[
     name = 'SimpleTransition'
-    cost = 1.0
+    cost = Arch.alg_qubits().contains
 ]
 
 Architecture[

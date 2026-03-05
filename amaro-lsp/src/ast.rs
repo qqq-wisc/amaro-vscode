@@ -173,6 +173,33 @@ pub enum ExprKind {
     },
 }
 
+impl std::fmt::Display for ExprKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExprKind::Identifier(_) => f.write_str("Identifier"),
+            ExprKind::IntLiteral(_) => f.write_str("Int"),
+            ExprKind::FloatLiteral(_) => f.write_str("Float"),
+            ExprKind::StringLiteral(_) => f.write_str("String"),
+            ExprKind::BoolLiteral(_) => f.write_str("Bool"),
+            ExprKind::List(..) => f.write_str("List"),
+            ExprKind::Tuple(..) => f.write_str("Tuple"),
+            ExprKind::StructLiteral { .. } => f.write_str("Struct"),
+            ExprKind::FunctionCall { .. } => f.write_str("Call"),
+            ExprKind::FieldAccess { .. } => f.write_str("FieldAccess"),
+            ExprKind::IndexAccess { .. } => f.write_str("Index"),
+            ExprKind::Lambda { .. } => f.write_str("Lambda"),
+            ExprKind::IfThenElse { .. } => f.write_str("If-Then-Else"),
+            ExprKind::LetBinding { .. } => f.write_str("Let"),
+            ExprKind::BinaryOp { .. } => f.write_str("Binary"),
+            ExprKind::UnaryOp { .. } => f.write_str("Unary"),
+            ExprKind::Some(..) => f.write_str("Some"),
+            ExprKind::None => f.write_str("None"),
+            ExprKind::TensorProduct { .. } => f.write_str("Tensor"),
+            ExprKind::Projection { .. } => f.write_str("Projection"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     // Arithmetic

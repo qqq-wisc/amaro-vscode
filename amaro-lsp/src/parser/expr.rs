@@ -407,7 +407,7 @@ fn parse_postfix_expr<'a>(
     ctx: &mut ParseContext,
 ) -> IResult<&'a str, Expr> {
     let (mut current_input, mut base) = parse_primary_expr(original_input, input, ctx)?;
-    let start = base.range.start.character as usize;
+    let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
     loop {
         if let Ok((rest, _)) = ws(char('.'))(current_input) {

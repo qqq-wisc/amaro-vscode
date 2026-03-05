@@ -483,6 +483,7 @@ RouteInfo:
     routed_gates = CX
     realize_gate = []
 TransitionInfo:
+    Transition{edge : (Location, Location)}
     cost = 1.0
     apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     get_transitions = []

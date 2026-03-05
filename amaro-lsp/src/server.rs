@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_lsp::jsonrpc::Result;
+use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
-use crate::parser::{check_semantics, parse_file};
+use crate::parser::symbols::{self, SymbolTable, Type, UserDefTable};
+use crate::parser::{
+    InferenceData, check_semantics, infer_expr_type, parse_file, semantics, utils,
+};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -394,6 +397,13 @@ impl LanguageServer for Backend {
                 )),
 
                 document_symbol_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec!['.'.to_string()]),
+                    ..Default::default()
+                }),
+
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
 
                 ..Default::default()
             },
@@ -466,5 +476,266 @@ impl LanguageServer for Backend {
         }
 
         Ok(None)
+    }
+
+    // triggers autocomplete
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        // get the text doc
+        let uri = params.text_document_position.text_document.uri;
+        let guard = self.documents.read().await;
+        let file_content = guard.get(&uri);
+
+        if file_content.is_none() {
+            return Err(Error::new(ErrorCode::InvalidRequest));
+        }
+
+        let string_content = file_content.unwrap();
+
+        // get original position of cursor. this is after the dot.
+        let orig_pos = params.text_document_position.position;
+        // dot needs 2 spaces before the cursor position, for a strange reason!
+        let dot_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(2));
+
+        // determine if . was typed
+        match utils::get_char_at(string_content, dot_pos) {
+            None => {
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         "Position was not within bounds of document.",
+                //     )
+                //     .await;
+                return Ok(None);
+            }
+            Some('.') => {} // matched the dot!
+            Some(_) => {
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         format!("Found character '{}' for completion.",c),
+                //     )
+                //     .await;
+                return Ok(None);
+            } // we matched the dot
+        }
+
+        // parse the file into expressions
+        let amaro_file = match parse_file(string_content) {
+            Ok(f) => f,
+            Err(_) => return Err(Error::new(ErrorCode::ParseError)),
+        };
+
+        // so, we have [stuff][.][cursor]
+        // we need to look 2 chars before
+        let before_dot_pos = Position::new(dot_pos.line, dot_pos.character.saturating_sub(1));
+
+        // self.client
+        //     .log_message(
+        //         MessageType::INFO,
+        //         format!("Checking for expr at position {:?}", new_pos),
+        //     )
+        //     .await;
+
+        // find the largest expression containing this position before the dot
+        let containing_expr = utils::largest_expr_containing(&amaro_file, before_dot_pos);
+
+        match containing_expr {
+            // if we had an expression containing our goal pos...
+            Ok(e) => {
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         format!("\tFound expression {} containing position.", e.kind),
+                //     )
+                //     .await;
+
+                // first, get user-defined structs
+                let user_def_table = UserDefTable::new(&amaro_file);
+
+                let mut sym_table = SymbolTable::new();
+                let mut type_map: HashMap<NodeId, Type> = HashMap::new();
+                let mut diags: Vec<Diagnostic> = Vec::new();
+
+                let mut inf_data = InferenceData {
+                    sym_table: &mut sym_table,
+                    diagnostics: &mut diags,
+                    type_map: &mut type_map,
+                    user_def_table: &user_def_table,
+                };
+
+                // explore the expr
+                infer_expr_type(e, &mut inf_data);
+
+                // now, need to find the expr right before our cursor, and get
+                // the type of that one.
+                // expr should end at the dot i think?
+                let goal_pos = Position::new(dot_pos.line, dot_pos.character.saturating_add(1));
+
+                match utils::find_finishing_subexpr(e, goal_pos) {
+                    Some(perfect_end_expr) => {
+                        // self.client
+                        //     .log_message(
+                        //         MessageType::INFO,
+                        //         format!("\tFound perfectly finishing expression {}", perfect_end_expr.kind),
+                        //     )
+                        //     .await;
+
+                        // get the types and stuff
+                        let found_type = match type_map.get(&perfect_end_expr.id) {
+                            Some(t) => t,
+                            None => return Err(Error::new(ErrorCode::InternalError)),
+                        };
+
+                        // self.client
+                        //     .log_message(
+                        //         MessageType::INFO,
+                        //         format!("\tHas type {:?}", found_type),
+                        //     )
+                        //     .await;
+
+                        match semantics::suggest_next_from_type(found_type, &user_def_table) {
+                            Some(suggestions) => Ok(Some(CompletionResponse::Array(
+                                suggestions
+                                    .iter()
+                                    .map(|sug| sug.to_completion_item())
+                                    .collect(),
+                            ))),
+                            None => Ok(None), // don't show suggestions then!
+                        }
+                    }
+                    // expression doesn't end at anything
+                    None => {
+                        // self.client
+                        //     .log_message(
+                        //         MessageType::INFO,
+                        //         "\tNo perfect ending expression found.".to_string(),
+                        //     )
+                        //     .await;
+                        Ok(None)
+                    }
+                }
+            }
+            // if we lacked an expression containing our goal pos...
+            Err(_) => {
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         "\tNo expression found containg the position.".to_string(),
+                //     )
+                //     .await;
+                Ok(None) //
+            }
+        }
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        // TODO make this more efficient.
+        // right now, we only cache the text and not the expressions & stuff.
+        // this is a lot of repeated work if the user changes hover often
+
+        // self.client
+        //     .log_message(
+        //         MessageType::INFO,
+        //         "We are trying to hover.".to_string(),
+        //     )
+        //     .await;
+
+        // get the text doc
+        let uri = params.text_document_position_params.text_document.uri;
+        let guard = self.documents.read().await;
+        let file_content = guard.get(&uri);
+
+        if file_content.is_none() {
+            return Err(Error::new(ErrorCode::InvalidRequest));
+        }
+
+        let string_content = file_content.unwrap();
+
+        // get original position of cursor. this is after the dot.
+        let orig_pos = params.text_document_position_params.position;
+
+        // parse the file into expressions
+        let amaro_file = match parse_file(string_content) {
+            Ok(f) => f,
+            Err(_) => return Err(Error::new(ErrorCode::ParseError)),
+        };
+
+        // first, check field names.
+        let hovered_field = utils::field_name_containing(&amaro_file, orig_pos);
+
+        if let Some((field_name, field_range)) = hovered_field {
+            // need to lookup the name
+            if let Some(field_type) = symbols::field_lookup(&field_name) {
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::PlainText,
+                        value: format!("{}", field_type),
+                    }),
+                    range: Some(field_range),
+                }));
+            } else {
+                // we are done. if we are hovered over a field but we don't
+                // have an entry, then there's nothing to show...
+                // LS: Would be good to display something indicating that the
+                // thing we are hovering over is not recognized by the program
+                return Ok(None);
+            }
+        }
+
+        // find the largest expression containing this position before the dot
+        let containing_expr = utils::smallest_expr_containing(&amaro_file, orig_pos);
+
+        match containing_expr {
+            // if we had an expression containing our goal pos...
+            Ok(e) => {
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         format!("\tFound expression {} containing position.", e.kind),
+                //     )
+                //     .await;
+
+                // first, get user-defined structs
+                let user_def_table = UserDefTable::new(&amaro_file);
+
+                let mut sym_table = SymbolTable::new();
+                let mut type_map: HashMap<NodeId, Type> = HashMap::new();
+                let mut diags: Vec<Diagnostic> = Vec::new();
+
+                let mut inf_data = InferenceData {
+                    sym_table: &mut sym_table,
+                    diagnostics: &mut diags,
+                    type_map: &mut type_map,
+                    user_def_table: &user_def_table,
+                };
+
+                // explore the expr
+                let inferred_type = infer_expr_type(e, &mut inf_data);
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         format!("\tFound the type {}", inferred_type),
+                //     )
+                //     .await;
+
+                Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::PlainText,
+                        value: format!("{}", inferred_type),
+                    }),
+                    range: Some(e.range),
+                }))
+            }
+            // if we lacked an expression containing our goal pos...
+            Err(_) => {
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         "\tNo expression found containing the position.".to_string(),
+                //     )
+                //     .await;
+                Ok(None) //
+            }
+        }
     }
 }

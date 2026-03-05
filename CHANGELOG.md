@@ -4,6 +4,20 @@ All notable changes to the "amaro-vscode" extension will be documented in this f
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+## [1.0.3] - 2026-02-26
+
+### Added
+- **Autocomplete:** Typing a '.' after some types will provide autocomplete options. For instance, typing `Arch.` shows the fields and functions on `Arch`.
+- **Expression type shown on hover:** Hovering over most expressions indicates the type of the expression.
+- **Field type shown on hover:** Hovering over a field within a block indicates the type of the field for most basic fields. For instance, hovering over `cost` in the `TransitionInfo` block will indicate that it expects a function `(Transition) -> Float`
+
+### Changed
+- **Expression inference:** The `infer_expr_type` method has changed signature. It additionally takes in a mutable `type_map` field, which stores mappings from expression IDs to their `Type`s as expression types are inferred. As well as this, a `user_def_table` is passed, which holds the fields for user-defined structs such as `Transition`.
+- **Type enum:** In conjunction with the above, the `Type` enum has been extended to allow for referring to user-defined types.
+
+### Fixed
+- Invalid ranges applied to some expressions. Now, ranges accurately reflect start and end bounds of all expressions.
+
 ## [1.0.2] - 2026-02-18
 
 ### Added
