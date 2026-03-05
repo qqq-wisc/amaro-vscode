@@ -662,7 +662,8 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             Type::Unknown
                         }
                     }
-                }
+                },
+                Type::Unknown => Type::Unknown,
                 _ => {
                     inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,

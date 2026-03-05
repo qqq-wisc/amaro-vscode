@@ -569,7 +569,7 @@ impl LanguageServer for Backend {
                 // now, need to find the expr right before our cursor, and get
                 // the type of that one.
                 // expr should end at the dot i think?
-                let goal_pos = Position::new(dot_pos.line, dot_pos.character + 1);
+                let goal_pos = Position::new(dot_pos.line, dot_pos.character.saturating_add(1));
 
                 match utils::find_finishing_subexpr(e, goal_pos) {
                     Some(perfect_end_expr) => {
