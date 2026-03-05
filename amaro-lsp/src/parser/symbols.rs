@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Write};
 
-use crate::ast::TypeAnnotation;
+use crate::{ast::TypeAnnotation, info::builtins};
 
 /// The type system for Amaro expressions.
 ///
@@ -38,11 +38,6 @@ pub enum Type {
     },
 
     // Struct types
-    Struct {
-        // TODO work to merge UserDef and Struct into one.
-        name: String,
-        fields: HashMap<String, Type>,
-    },
     UserDef(String),
 
     // Generic
@@ -152,7 +147,6 @@ impl std::fmt::Display for Type {
                 return_type.fmt(f)
             }
             Type::UserDef(name) => f.write_str(name),
-            Type::Struct { name, .. } => f.write_str(name),
             Type::Generic(c) => write!(f, "T{}", c),
             Type::Unknown => f.write_char('?'),
         }
@@ -168,75 +162,22 @@ pub struct SymbolTable {
     scopes: Vec<HashMap<String, Type>>,
 }
 
-/// There are user-defined types, like Transition.
-/// We need to have ONE place where we store these types.
-/// Then, we can reference these types from here by name.
-pub struct UserDefTable {
-    /// maps from type names (like Transition) to their fields
-    map: HashMap<String, UserDefEntry>,
-}
-
-struct UserDefEntry {
-    fields: HashMap<String, Type>,
-}
-
-impl UserDefTable {
-    /// Given an AmaroFile, creates a UserDefTable which determines the fields
-    /// of user-defined types.
-    pub fn new(file: &crate::ast::AmaroFile) -> Self {
-        // TODO work on adding diagnostics in the case of errors
-        let mut map: HashMap<String, UserDefEntry> = HashMap::new();
-
-        for block in &file.blocks {
-            let crate::ast::BlockContent::Fields(items) = &block.content;
-            items
-                .iter()
-                .filter_map(|elt| match elt {
-                    crate::ast::BlockItem::Field(_) => None,
-                    crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
-                })
-                .for_each(|struct_def| {
-                    let fields = struct_def
-                        .fields
-                        .iter()
-                        .map(|elt| {
-                            (
-                                elt.name.clone(),
-                                Type::from_type_annotation(&elt.type_annotation),
-                            )
-                        })
-                        .collect();
-                    map.insert(struct_def.name.clone(), UserDefEntry { fields });
-                })
-        }
-
-        UserDefTable { map }
-    }
-
-    /// Creates an empty UserDefTable. Useful if it is known that there are no
-    /// user-defined types.
-    #[cfg(test)]
-    pub fn empty() -> Self {
-        Self {
-            map: HashMap::new(),
-        }
-    }
-
-    /// Gets the fields of a user-defined type, if the type has a definition.
-    pub fn get_fields(&self, identifier: &str) -> Option<&HashMap<String, Type>> {
-        self.map.get(identifier).map(|elt| &elt.fields)
-    }
-}
-
 impl SymbolTable {
     /// Creates a new symbol table with all built-in types and functions registered.
     pub fn new() -> Self {
         let mut global_scope = HashMap::new();
 
-        Self::register_context_vars(&mut global_scope);
-        Self::register_constructors(&mut global_scope);
-        Self::register_gate_literals(&mut global_scope);
-        Self::register_builtin_functions(&mut global_scope);
+        builtins::get_all_raw_built_ins().iter().for_each(|elt| 
+            match global_scope.insert(elt.identifier.clone(), elt.typ.clone()) {
+                Some(i) => panic!("Hey! The built-ins gave a definition for two of the same identifier. Duped elt: {}", i),
+                None => {}
+            }
+        );
+
+        // Self::register_context_vars(&mut global_scope);
+        // Self::register_constructors(&mut global_scope);
+        // Self::register_gate_literals(&mut global_scope);
+        // Self::register_builtin_functions(&mut global_scope);
         SymbolTable {
             scopes: vec![global_scope],
         }
@@ -459,6 +400,66 @@ impl SymbolTable {
 impl Default for SymbolTable {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// There are user-defined types, like Transition.
+/// We need to have ONE place where we store these types.
+/// Then, we can reference these types from here by name.
+pub struct UserDefTable {
+    /// maps from type names (like Transition) to their fields
+    map: HashMap<String, UserDefEntry>,
+}
+
+struct UserDefEntry {
+    fields: HashMap<String, Type>,
+}
+
+impl UserDefTable {
+    /// Given an AmaroFile, creates a UserDefTable which determines the fields
+    /// of user-defined types.
+    pub fn new(file: &crate::ast::AmaroFile) -> Self {
+        // TODO work on adding diagnostics in the case of errors
+        let mut map: HashMap<String, UserDefEntry> = HashMap::new();
+
+        for block in &file.blocks {
+            let crate::ast::BlockContent::Fields(items) = &block.content;
+            items
+                .iter()
+                .filter_map(|elt| match elt {
+                    crate::ast::BlockItem::Field(_) => None,
+                    crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
+                })
+                .for_each(|struct_def| {
+                    let fields = struct_def
+                        .fields
+                        .iter()
+                        .map(|elt| {
+                            (
+                                elt.name.clone(),
+                                Type::from_type_annotation(&elt.type_annotation),
+                            )
+                        })
+                        .collect();
+                    map.insert(struct_def.name.clone(), UserDefEntry { fields });
+                })
+        }
+
+        UserDefTable { map }
+    }
+
+    /// Creates an empty UserDefTable. Useful if it is known that there are no
+    /// user-defined types.
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    /// Gets the fields of a user-defined type, if the type has a definition.
+    pub fn get_fields(&self, identifier: &str) -> Option<&HashMap<String, Type>> {
+        self.map.get(identifier).map(|elt| &elt.fields)
     }
 }
 

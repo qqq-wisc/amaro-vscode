@@ -1,2 +1,2 @@
-pub mod suggestion;
 pub mod builtins;
+pub mod suggestion;
