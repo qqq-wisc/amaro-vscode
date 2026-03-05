@@ -24,14 +24,24 @@ if ! command -v cargo &>/dev/null; then
     exit 1
 fi
 
-if ! cargo zigbuild --version &>/dev/null 2>&1; then
+# Locate cargo-zigbuild: prefer ~/.cargo/bin, then fall back to PATH
+ZIGBUILD="${HOME}/.cargo/bin/cargo-zigbuild"
+if ! command -v "$ZIGBUILD" &>/dev/null; then
+    ZIGBUILD="cargo-zigbuild"
+fi
+if ! "$ZIGBUILD" --help &>/dev/null 2>&1; then
     echo "ERROR: cargo-zigbuild not found."
     echo "  Install it with:  cargo install cargo-zigbuild"
     echo "  Then install zig: brew install zig"
     exit 1
 fi
 
-if ! command -v zig &>/dev/null; then
+# Locate zig: Homebrew prefix first, then PATH
+ZIG="$(brew --prefix zig 2>/dev/null)/bin/zig"
+if ! command -v "$ZIG" &>/dev/null; then
+    ZIG="zig"
+fi
+if ! "$ZIG" version &>/dev/null 2>&1; then
     echo "ERROR: zig not found."
     echo "  Install it with: brew install zig"
     exit 1
@@ -44,7 +54,7 @@ mkdir -p "$BIN_DIR"
 echo "==> Adding Rust targets..."
 rustup target add aarch64-apple-darwin        2>/dev/null || true
 rustup target add x86_64-apple-darwin         2>/dev/null || true
-rustup target add x86_64-unknown-linux-musl   2>/dev/null || true
+rustup target add x86_64-unknown-linux-gnu    2>/dev/null || true
 rustup target add x86_64-pc-windows-gnu       2>/dev/null || true
 
 cd "$LSP_DIR"
@@ -55,8 +65,8 @@ cd "$LSP_DIR"
 
 echo ""
 echo "==> Building macOS (arm64 + x86_64 universal)..."
-cargo zigbuild --target aarch64-apple-darwin --release
-cargo zigbuild --target x86_64-apple-darwin  --release
+$ZIGBUILD build --target aarch64-apple-darwin --release
+$ZIGBUILD build --target x86_64-apple-darwin  --release
 
 if command -v lipo &>/dev/null; then
     lipo -create \
@@ -76,19 +86,19 @@ else
 fi
 
 # ── Linux ──────────────────────────────────────────────────────────────────────
-# musl target produces a fully static binary that runs on any 64-bit Linux.
+# gnu target — dynamically linked against glibc (works on all modern Linux distros).
 
 echo ""
-echo "==> Building Linux (x86_64-musl, static)..."
-cargo zigbuild --target x86_64-unknown-linux-musl --release
-cp target/x86_64-unknown-linux-musl/release/amaro-lsp "$BIN_DIR/amaro-lsp-linux"
+echo "==> Building Linux (x86_64-gnu)..."
+$ZIGBUILD build --target x86_64-unknown-linux-gnu --release
+cp target/x86_64-unknown-linux-gnu/release/amaro-lsp "$BIN_DIR/amaro-lsp-linux"
 
 # ── Windows ────────────────────────────────────────────────────────────────────
 # GNU target avoids the need for xwin / MSVC toolchain.
 
 echo ""
 echo "==> Building Windows (x86_64-gnu)..."
-cargo zigbuild --target x86_64-pc-windows-gnu --release
+$ZIGBUILD build --target x86_64-pc-windows-gnu --release
 cp target/x86_64-pc-windows-gnu/release/amaro-lsp.exe "$BIN_DIR/amaro-lsp-win.exe"
 
 # ── Summary ────────────────────────────────────────────────────────────────────
