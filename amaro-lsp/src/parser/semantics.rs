@@ -870,6 +870,10 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
         (Type::Qubit, Type::Int) => true,
         (Type::Int, Type::Qubit) => true,
 
+        // Location/Int leniency - Location wraps usize, valid as Vec index
+        (Type::Location, Type::Int) => true,
+        (Type::Int, Type::Location) => true,
+
         // Numeric leniency
         (Type::Int, Type::Float) => true,
         (Type::Float, Type::Int) => true,

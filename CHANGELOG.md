@@ -29,7 +29,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/).
 ### Changed
 - **Expression inference:** The `infer_expr_type` method has changed signature. It additionally takes in a mutable `type_map` field, which stores mappings from expression IDs to their `Type`s as expression types are inferred. As well as this, a `user_def_table` is passed, which holds the fields for user-defined structs such as `Transition`.
 - **Type enum:** In conjunction with the above, the `Type` enum has been extended to allow for referring to user-defined types.
-- **`path` Built-in Signature:** Corrected from 0 parameters to `path(Location, Location, Vec<(Location, Location)>) -> Vec<Location>`, matching its actual usage in example files.
 
 ## [1.0.2] - 2026-02-18
 

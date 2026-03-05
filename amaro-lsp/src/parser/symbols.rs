@@ -407,11 +407,7 @@ impl SymbolTable {
         scope.insert(
             "path".to_string(),
             Type::Function {
-                params: vec![
-                    Type::Location,
-                    Type::Location,
-                    Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location]))),
-                ],
+                params: vec![],
                 return_type: Box::new(Type::Vec(Box::new(Type::Location))),
             },
         );
