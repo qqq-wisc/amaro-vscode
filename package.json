@@ -2,7 +2,7 @@
   "name": "amaro-vscode",
   "displayName": "Amaro Quantum Routing DSL",
   "description": "Syntax highlighting and LSP support for .qmrl files",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "keshavsharma-wisc",
   "license": "Apache-2.0",
   "engines": {
@@ -70,7 +70,8 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "postinstall": "npm run build-lsp",
-    "build-lsp": "cd amaro-lsp && cargo build --release"
+    "build-lsp": "cd amaro-lsp && cargo build --release",
+    "build-binaries": "bash scripts/build-binaries.sh"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
