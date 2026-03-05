@@ -550,7 +550,7 @@ impl LanguageServer for Backend {
         // parse the file into expressions
         let amaro_file = match parse_file(string_content) {
             Ok(f) => f,
-            Err(_) => return Err(Error::new(ErrorCode::ParseError)),
+            Err(_) => return Err(Error::new(ErrorCode::InternalError)),
         };
 
         // so, we have [stuff][.][cursor]
@@ -685,7 +685,7 @@ impl LanguageServer for Backend {
         // parse the file into expressions
         let amaro_file = match parse_file(string_content) {
             Ok(f) => f,
-            Err(_) => return Err(Error::new(ErrorCode::ParseError)),
+            Err(_) => return Err(Error::new(ErrorCode::InternalError)),
         };
 
         // first, check field names.

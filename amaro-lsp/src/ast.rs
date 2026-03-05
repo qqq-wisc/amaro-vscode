@@ -244,6 +244,29 @@ pub enum BinaryOperator {
     Tensor, // ⊗
 }
 
+impl std::fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            BinaryOperator::Add => "+",
+            BinaryOperator::Sub => "-",
+            BinaryOperator::Mul => "*",
+            BinaryOperator::Div => "/",
+            BinaryOperator::Mod => "%",
+            BinaryOperator::Eq => "==",
+            BinaryOperator::Ne => "!=",
+            BinaryOperator::Lt => "<",
+            BinaryOperator::Le => "<=",
+            BinaryOperator::Gt => ">",
+            BinaryOperator::Ge => ">=",
+            BinaryOperator::And => "&&",
+            BinaryOperator::Or => "||",
+            BinaryOperator::Range => "..",
+            BinaryOperator::Tensor => "⊗",
+        };
+        f.write_str(s)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOperator {
     Not,

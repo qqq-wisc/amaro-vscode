@@ -614,9 +614,8 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            
                             message: format!(
-                                "Cannot use operation {:?} on types {} and {}.",
+                                "Cannot use operation '{}' on types {} and {}.",
                                 op, left_type, right_type
                             ),
                             ..Default::default()
@@ -633,9 +632,8 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            
                             message: format!(
-                                "Cannot use operation {:?} on types {} and {}.",
+                                "Cannot use operation '{}' on types {} and {}.",
                                 op, left_type, right_type
                             ),
                             ..Default::default()
@@ -669,7 +667,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-                            
                             message: format!(
                                 "Cannot use logical operations on types {} and {}.",
                                 left_type, right_type
@@ -937,7 +934,7 @@ impl Suggestion {
             Type::Tuple(..) => CompletionItemKind::VARIABLE,
             Type::Option(..) => CompletionItemKind::ENUM,
             Type::Function { .. } => CompletionItemKind::FUNCTION,
-            //Type::Struct { .. } => CompletionItemKind::STRUCT,
+            Type::Struct { .. } => CompletionItemKind::STRUCT,
             Type::UserDef(..) => CompletionItemKind::STRUCT,
             _ => CompletionItemKind::CONSTANT,
         }
