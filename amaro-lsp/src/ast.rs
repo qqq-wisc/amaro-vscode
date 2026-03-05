@@ -211,6 +211,7 @@ impl std::fmt::Display for ExprKind {
             ExprKind::None => f.write_str("None"),
             ExprKind::TensorProduct { .. } => f.write_str("Tensor"),
             ExprKind::Projection { .. } => f.write_str("Projection"),
+            ExprKind::Match { .. } => f.write_str("Match"),
         }
     }
 }

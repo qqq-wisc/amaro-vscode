@@ -509,7 +509,18 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         Type::Unknown,
                         |fields_map| match fields_map.get(field) {
                             Some(t) => t.clone(),
-                            None => Type::Unknown,
+                            None => {
+                                inference_data.diagnostics.push(Diagnostic {
+                                    range: expr.range,
+                                    severity: Some(DiagnosticSeverity::WARNING),
+                                    message: format!(
+                                        "No field '{}' on struct '{}'.",
+                                        field, name
+                                    ),
+                                    ..Default::default()
+                                });
+                                Type::Unknown
+                            }
                         },
                     )
                 }

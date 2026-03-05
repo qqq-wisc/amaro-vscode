@@ -194,6 +194,7 @@ impl UserDefTable {
                 .filter_map(|elt| match elt {
                     crate::ast::BlockItem::Field(_) => None,
                     crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
+                    crate::ast::BlockItem::ReturnKeyword { .. } => None,
                 })
                 .for_each(|struct_def| {
                     let fields = struct_def
