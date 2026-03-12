@@ -39,7 +39,7 @@ fn test_advanced_features_and_vectors() {
     "#;
 
     let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     // 3. Assert NO Errors
     for diag in &diags {

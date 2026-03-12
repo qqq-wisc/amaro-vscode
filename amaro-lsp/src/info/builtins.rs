@@ -4,6 +4,10 @@
 // no hard-coding should take place except for in here.
 // then, if later plans change about the types, only this needs to be modified.
 
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, MarkupContent,
+};
+
 use crate::parser::{semantics, symbols::Type};
 use std::{collections::HashMap, sync::OnceLock};
 
@@ -52,14 +56,14 @@ pub fn get_all_raw_built_ins() -> Vec<&'static BuiltIn> {
 /// contains, push, pop, etc functions.
 ///
 /// TODO this is awkward with generics.
-pub fn get_all_built_ins_after_type<'a>(t1: &Type) -> Option<Owner<'static, Vec<BuiltIn>>> {
+pub fn get_all_built_ins_after_type(t1: &Type) -> Option<Owner<'static, Vec<BuiltIn>>> {
     let data = GLOBAL.get_or_init(init_global);
 
     // if type has generics, then we need to be able to understand this.
     let res: Option<(&Vec<BuiltIn>, HashMap<u8, Type>)> =
         data.iter().filter(|elt| elt.0.is_some()).find_map(|elt| {
             let mut map = HashMap::new();
-            match semantics::infer_generic_type(&elt.0.as_ref().unwrap(), t1, &mut map) {
+            match semantics::infer_generic_type(elt.0.as_ref().unwrap(), t1, &mut map) {
                 Err(_) => None,
                 Ok(_) => Some((elt.1.as_ref(), map)),
             }
@@ -71,7 +75,7 @@ pub fn get_all_built_ins_after_type<'a>(t1: &Type) -> Option<Owner<'static, Vec<
             None
         }
         Some(pair) => {
-            if pair.1.len() == 0 {
+            if pair.1.is_empty() {
                 // we can just output the vec, bc it is not generic
                 Some(Owner::Borrowed(pair.0))
             } else {
@@ -84,13 +88,13 @@ pub fn get_all_built_ins_after_type<'a>(t1: &Type) -> Option<Owner<'static, Vec<
                     pair.0
                         .iter()
                         .filter_map(|elt| match semantics::degenerisize(&elt.typ, &pair.1) {
-                            Ok(true_type) => Some(BuiltIn {
+                            (false, _) => None, // failed to degenerisize
+                            (_, true_type) => Some(BuiltIn {
                                 parent_type: elt.parent_type.clone(),
                                 identifier: elt.identifier.clone(),
                                 typ: true_type,
                                 details: elt.details.clone(),
                             }),
-                            Err(_) => None,
                         })
                         .collect(),
                 ))
@@ -104,10 +108,7 @@ pub fn get_all_built_ins_after_type<'a>(t1: &Type) -> Option<Owner<'static, Vec<
 /// is a valid built-in (which, it is!). If it is, provides the BuiltIn info.
 /// Otherwise, gives None.
 /// Handles generics, giving the proper type.
-pub fn check_built_in_after_type<'a>(
-    t1: &Type,
-    identifier: &str,
-) -> Option<Owner<'static, BuiltIn>> {
+pub fn check_built_in_after_type(t1: &Type, identifier: &str) -> Option<Owner<'static, BuiltIn>> {
     let data = GLOBAL.get_or_init(init_global);
 
     match data.iter().filter(|elt| elt.0.is_some()).find_map(|elt| {
@@ -127,15 +128,15 @@ pub fn check_built_in_after_type<'a>(
                         Owner::Borrowed(found)
                     } else {
                         match semantics::degenerisize(&found.typ, &map) {
-                            Ok(degenerisized_type) => Owner::Owned(BuiltIn {
+                            (false, _) => Owner::Borrowed(found), // This case is a fall back if something goes wrong
+                            // LS: Investigate this case and see if it's needed or what we could
+                            // maybe do about it.
+                            (_, degenerisized_type) => Owner::Owned(BuiltIn {
                                 parent_type: Some(t1.clone()),
                                 identifier: identifier.to_string(),
                                 typ: degenerisized_type,
                                 details: found.details.clone(),
                             }),
-                            Err(_) => Owner::Borrowed(found), // This case is a fall back if something goes wrong
-                                                              // LS: Investigate this case and see if it's needed or what we could
-                                                              // maybe do about it.
                         }
                     }
                 })
@@ -145,8 +146,8 @@ pub fn check_built_in_after_type<'a>(
 
 /// Run this in get_or_init
 fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
-    let mut map = Vec::new();
-    map.push((None, vec![
+    vec![
+        (None, vec![
         // type keywords
         BuiltIn {
             parent_type: None,
@@ -312,21 +313,21 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             parent_type: None,
             identifier: "value_swap".to_string(),
             typ: Type::Function { params: vec![Type::Location, Type::Location], return_type: Box::new(Type::QubitMap) },
-            details: "[TODO info about value_swap goes here]".to_string()
+            details: "".to_string() // TODO details
         },
 
         BuiltIn {
             parent_type: None,
             identifier: "values".to_string(),
             typ: Type::Function { params: vec![Type::QubitMap], return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
-            details: "[TODO info about values goes here]".to_string()
+            details: "".to_string() // TODO details
         },
 
         BuiltIn {
             parent_type: None,
             identifier: "identity_application".to_string(),
             typ: Type::Function { params: vec![Type::Unknown], return_type: Box::new(Type::Unknown) },
-            details: "[TODO info about identity_application goes here]".to_string()
+            details: "".to_string() // TODO details
         },
 
         // generic map
@@ -334,11 +335,11 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             parent_type: None,
             identifier: "map".to_string(),
             typ: Type::Function { params: vec![
-                Type::Function { 
+                Type::Function {
                     params: vec![
                         Type::Generic(0)
-                    ], 
-                    return_type: Box::new(Type::Generic(1)) }, 
+                    ],
+                    return_type: Box::new(Type::Generic(1)) },
                 Type::Vec(Box::new(Type::Generic(0)))], return_type: Box::new(Type::Vec(Box::new(Type::Generic(1)))) },
             details: "Turns a Vec of one type into a Vec of another type by mapping each element.".to_string()
         },
@@ -364,9 +365,9 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 Type::Location,
                 Type::Int,
                 Type::Int
-                ], 
+                ],
                 return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
-            details: "[TODO info about vertical_neighbors goes here]".to_string()
+            details: "".to_string() // TODO details
         },
         BuiltIn {
             parent_type: None,
@@ -374,25 +375,29 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             typ: Type::Function { params: vec![
                 Type::Location,
                 Type::Int
-                ], 
+                ],
                 return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
-            details: "[TODO info about horizontal_neighbors goes here]".to_string()
+            details: "".to_string() // TODO details
         },
 
         // path fcns
         BuiltIn {
             parent_type: None,
             identifier: "path".to_string(),
-            typ: Type::Function { params: vec![], 
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
-            details: "[TODO info about path goes here]".to_string()
+            typ: Type::Function {
+                params: vec![],
+                return_type: Box::new(Type::Vec(Box::new(Type::Location)))
+            },
+            details: "".to_string() // TODO details
         },
         BuiltIn {
             parent_type: None,
             identifier: "tree".to_string(),
-            typ: Type::Function { params: vec![], 
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
-            details: "[TODO info about tree goes here]".to_string()
+            typ: Type::Function {
+                params: vec![],
+                return_type: Box::new(Type::Vec(Box::new(Type::Location)))
+            },
+            details: "".to_string() // TODO details
         },
         BuiltIn {
             parent_type: None,
@@ -402,9 +407,9 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 Type::Vec(Box::new(Type::Location)),
                 Type::Vec(Box::new(Type::Location)),
                 Type::Vec(Box::new(Type::Location)),
-            ], 
+            ],
                 return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))) },
-            details: "[TODO info about all_paths goes here]".to_string()
+            details: "".to_string() // TODO details
         },
         BuiltIn {
             parent_type: None,
@@ -414,9 +419,9 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 Type::Vec(Box::new(Type::Location)),
                 Type::Vec(Box::new(Type::Location)),
                 Type::Vec(Box::new(Type::Location)),
-            ], 
+            ],
                 return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))) },
-            details: "[TODO info about shortest_path goes here]".to_string()
+            details: "".to_string() // TODO details
         },
         BuiltIn {
             parent_type: None,
@@ -425,13 +430,12 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 Type::ArchT,
                 Type::Vec(Box::new(Type::Vec(Box::new(Type::Location)))),
                 Type::Vec(Box::new(Type::Location)),
-            ], 
+            ],
                 return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
-            details: "[TODO info about steiner_trees goes here]".to_string()
+            details: "".to_string() // TODO details
         },
-    ]));
-
-    map.push((
+    ]),
+    (
         Some(Type::Gate),
         vec![
             // type-specific '.' functions and fields
@@ -485,9 +489,8 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 details: "[TODO info about .z_indices goes here]".to_string(),
             },
         ],
-    ));
-
-    map.push((
+    ),
+    (
         Some(Type::ArchT),
         vec![
             // Arch
@@ -555,9 +558,8 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 details: "[TODO info about Arch.alg_qubits goes here]".to_string(),
             },
         ],
-    ));
-
-    map.push((
+    ),
+    (
         Some(Type::StateT),
         vec![
             // State
@@ -582,13 +584,13 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             BuiltIn {
                 parent_type: Some(Type::StateT),
                 identifier: "implemented_gates".to_string(),
-                typ: Type::Unknown,
+                typ: Type::Function { params: vec![],
+                    return_type: Box::new(Type::Vec(Box::new(Type::Unknown))) }, // TODO what is the type of this?
                 details: "[TODO info about State.implemented_gates goes here]".to_string(),
             },
         ],
-    ));
-
-    map.push((
+    ),
+    (
         Some(Type::Vec(Box::new(Type::Generic(0)))),
         vec![
             // Vec
@@ -644,9 +646,8 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 details: "Gets the number of elements in the Vec.".to_string(),
             },
         ],
-    ));
-
-    map.push((
+    ),
+    (
         Some(Type::Option(Box::new(Type::Generic(0)))),
         vec![
             // Option
@@ -663,8 +664,8 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                         .to_string(),
             },
         ],
-    ));
-    map
+    )
+    ]
 }
 
 /// DO NOT IMPLEMENT CLONE OR COPY.
@@ -675,6 +676,76 @@ pub struct BuiltIn {
     pub identifier: String,
     pub typ: Type,
     pub details: String,
+}
+
+impl BuiltIn {
+    pub fn to_completion_item(
+        &self,
+        additional_text_edits: Option<Vec<tower_lsp::lsp_types::TextEdit>>,
+    ) -> CompletionItem {
+        CompletionItem {
+            label: self.identifier.clone(),
+            label_details: Some(BuiltIn::get_completion_item_label_details(&self.typ)),
+            kind: Some(BuiltIn::type_to_completion_item_kind(&self.typ)),
+            // detail: Some(BuiltIn::get_completion_item_detail(&self.typ, &self.details)),
+            documentation: Some(tower_lsp::lsp_types::Documentation::MarkupContent(
+                MarkupContent {
+                    kind: tower_lsp::lsp_types::MarkupKind::Markdown,
+                    value: BuiltIn::get_completion_item_detail(&self.typ, &self.details),
+                },
+            )),
+            sort_text: Some(self.to_sort_string()),
+            additional_text_edits,
+            ..Default::default()
+        }
+    }
+
+    fn to_sort_string(&self) -> String {
+        match self.typ {
+            Type::Function { .. } => format!("a{}", self.identifier),
+            _ => format!("z{}{}", self.typ, self.identifier),
+        }
+    }
+
+    fn type_to_completion_item_kind(typ: &Type) -> CompletionItemKind {
+        match typ {
+            Type::Int => CompletionItemKind::FIELD,
+            Type::Float => CompletionItemKind::FIELD,
+            Type::Bool => CompletionItemKind::FIELD,
+            Type::String => CompletionItemKind::FIELD,
+            Type::Location => CompletionItemKind::STRUCT,
+            Type::Qubit => CompletionItemKind::STRUCT,
+            Type::QubitMap => CompletionItemKind::STRUCT,
+            Type::Gate => CompletionItemKind::STRUCT,
+            Type::ArchT => CompletionItemKind::STRUCT,
+            Type::StateT => CompletionItemKind::STRUCT,
+            Type::InstrT => CompletionItemKind::STRUCT,
+            Type::Vec(..) => CompletionItemKind::VARIABLE,
+            Type::Tuple(..) => CompletionItemKind::VARIABLE,
+            Type::Option(..) => CompletionItemKind::ENUM,
+            Type::Function { .. } => CompletionItemKind::FUNCTION,
+            //Type::Struct { .. } => CompletionItemKind::STRUCT,
+            Type::UserDef(..) => CompletionItemKind::STRUCT,
+            _ => CompletionItemKind::CONSTANT,
+        }
+    }
+
+    fn get_completion_item_label_details(typ: &Type) -> CompletionItemLabelDetails {
+        CompletionItemLabelDetails {
+            detail: match typ {
+                Type::Vec(..) => Some(": Array".to_string()),
+                Type::Tuple(..) => Some(": Tuple".to_string()),
+                Type::Function { .. } => Some(": Function".to_string()),
+                Type::UserDef { .. } => Some(": Struct".to_string()),
+                _ => None,
+            },
+            description: Some(format!("{}", typ)),
+        }
+    }
+
+    fn get_completion_item_detail(typ: &Type, details: &str) -> String {
+        format!("{}\n\n{}", typ, details)
+    }
 }
 
 #[cfg(test)]
@@ -700,6 +771,308 @@ mod tests {
         );
 
         assert!(get_raw_built_in("contains").is_none());
+    }
+
+    #[test]
+    fn test_get_all_raw() {
+        let raws_expected = vec![
+        // type keywords
+        BuiltIn {
+            parent_type: None,
+            identifier: "Arch".to_string(),
+            typ: Type::ArchT,
+            details: "Architecture type.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "arch".to_string(),
+            typ: Type::ArchT,
+            details: "Architecture type.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "State".to_string(),
+            typ: Type::StateT,
+            details: "State type.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Gate".to_string(),
+            typ: Type::Gate,
+            details: "Gate type.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "step".to_string(),
+            typ: Type::Int,
+            details: "Step type. Alias for Int".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Transition".to_string(),
+            typ: Type::UserDef("Transition".to_string()),
+            details: "Transition type. Fields defined by user.".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "GateRealization".to_string(),
+            typ: Type::UserDef("GateRealization".to_string()),
+            details: "Step type. Alias for Int".to_string()
+        },
+
+
+        // constructors
+        BuiltIn {
+            parent_type: None,
+            identifier: "Qubit".to_string(),
+            typ: Type::Function {
+                params: vec![Type::Int],
+                return_type: Box::new(Type::Qubit)
+            },
+            details: "Constructor for Qubit".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Location".to_string(),
+            typ: Type::Function { params: vec![Type::Int], return_type: Box::new(Type::Location) },
+            details: "Constructor for Location".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Vec".to_string(),
+            typ: Type::Function { params: vec![], return_type: Box::new(Type::Vec(Box::new(Type::Unknown))) },
+            details: "Constructor for Vec".to_string()
+        },
+
+        // gates
+        BuiltIn {
+            parent_type: None,
+            identifier: "CX".to_string(),
+            typ: Type::Gate,
+            details: "CX gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "T".to_string(),
+            typ: Type::Gate,
+            details: "T gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Pauli".to_string(),
+            typ: Type::Gate,
+            details: "Pauli gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "PauliMeasurement".to_string(),
+            typ: Type::Gate,
+            details: "PauliMeasurement gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "H".to_string(),
+            typ: Type::Gate,
+            details: "H gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "CZ".to_string(),
+            typ: Type::Gate,
+            details: "CZ gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "X".to_string(),
+            typ: Type::Gate,
+            details: "X gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Y".to_string(),
+            typ: Type::Gate,
+            details: "Y gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Z".to_string(),
+            typ: Type::Gate,
+            details: "Z gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "S".to_string(),
+            typ: Type::Gate,
+            details: "S gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Sdg".to_string(),
+            typ: Type::Gate,
+            details: "Sdg gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Tdg".to_string(),
+            typ: Type::Gate,
+            details: "Tdg gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "RX".to_string(),
+            typ: Type::Gate,
+            details: "RX gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "RY".to_string(),
+            typ: Type::Gate,
+            details: "RY gate".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "RZ".to_string(),
+            typ: Type::Gate,
+            details: "RZ gate".to_string()
+        },
+
+        // functions
+        BuiltIn {
+            parent_type: None,
+            identifier: "value_swap".to_string(),
+            typ: Type::Function { params: vec![Type::Location, Type::Location], return_type: Box::new(Type::QubitMap) },
+            details: "".to_string() // TODO details
+        },
+
+        BuiltIn {
+            parent_type: None,
+            identifier: "values".to_string(),
+            typ: Type::Function { params: vec![Type::QubitMap], return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
+            details: "".to_string() // TODO details
+        },
+
+        BuiltIn {
+            parent_type: None,
+            identifier: "identity_application".to_string(),
+            typ: Type::Function { params: vec![Type::Unknown], return_type: Box::new(Type::Unknown) },
+            details: "".to_string() // TODO details
+        },
+
+        // generic map
+        BuiltIn {
+            parent_type: None,
+            identifier: "map".to_string(),
+            typ: Type::Function { params: vec![
+                Type::Function {
+                    params: vec![
+                        Type::Generic(0)
+                    ],
+                    return_type: Box::new(Type::Generic(1)) },
+                Type::Vec(Box::new(Type::Generic(0)))], return_type: Box::new(Type::Vec(Box::new(Type::Generic(1)))) },
+            details: "Turns a Vec of one type into a Vec of another type by mapping each element.".to_string()
+        },
+        // generic fold
+        BuiltIn {
+            parent_type: None,
+            identifier: "fold".to_string(),
+            typ: Type::Function { params: vec![
+                Type::Generic(1), // init acc value
+                Type::Function { params: vec![
+                    Type::Generic(1), // acc
+                    Type::Generic(0), // elt
+                ], return_type: Box::new(Type::Generic(1)) },
+                Type::Vec(Box::new(Type::Generic(0)))], return_type: Box::new(Type::Unknown) },
+            details: "Given a Vec and an initial accumulation value, runs the accumulation function at each element to eventually return a single accumulated value.".to_string()
+        },
+
+        //neighbor fcns
+        BuiltIn {
+            parent_type: None,
+            identifier: "vertical_neighbors".to_string(),
+            typ: Type::Function { params: vec![
+                Type::Location,
+                Type::Int,
+                Type::Int
+                ],
+                return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
+            details: "".to_string() // TODO details
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "horizontal_neighbors".to_string(),
+            typ: Type::Function { params: vec![
+                Type::Location,
+                Type::Int
+                ],
+                return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
+            details: "".to_string() // TODO details
+        },
+
+        // path fcns
+        BuiltIn {
+            parent_type: None,
+            identifier: "path".to_string(),
+            typ: Type::Function {
+                params: vec![],
+                return_type: Box::new(Type::Vec(Box::new(Type::Location)))
+            },
+            details: "".to_string() // TODO details
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "tree".to_string(),
+            typ: Type::Function {
+                params: vec![],
+                return_type: Box::new(Type::Vec(Box::new(Type::Location)))
+            },
+            details: "".to_string() // TODO details
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "all_paths".to_string(),
+            typ: Type::Function { params: vec![
+                Type::ArchT,
+                Type::Vec(Box::new(Type::Location)),
+                Type::Vec(Box::new(Type::Location)),
+                Type::Vec(Box::new(Type::Location)),
+            ],
+                return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))) },
+            details: "".to_string() // TODO details
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "shortest_path".to_string(),
+            typ: Type::Function { params: vec![
+                Type::ArchT,
+                Type::Vec(Box::new(Type::Location)),
+                Type::Vec(Box::new(Type::Location)),
+                Type::Vec(Box::new(Type::Location)),
+            ],
+                return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))) },
+            details: "".to_string() // TODO details
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "steiner_trees".to_string(),
+            typ: Type::Function { params: vec![
+                Type::ArchT,
+                Type::Vec(Box::new(Type::Vec(Box::new(Type::Location)))),
+                Type::Vec(Box::new(Type::Location)),
+            ],
+                return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
+            details: "".to_string() // TODO details
+        },
+    ];
+
+        let raws_actual = get_all_raw_built_ins();
+        for expected in raws_expected {
+            assert!(
+                raws_actual
+                    .iter()
+                    .find(|elt| elt.details == expected.details && elt.typ == expected.typ)
+                    .is_some()
+            );
+        }
     }
 
     #[test]

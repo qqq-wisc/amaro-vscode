@@ -19,7 +19,7 @@ TransitionInfo:
 fn capitalization_warning() {
     let input = format!("{}\narchitecture[name='test']", MOCK_MANDATORY_BLOCKS);
     let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let cap_errors: Vec<_> = diags
         .iter()
@@ -38,7 +38,7 @@ fn capitalization_warning() {
 fn no_warning_for_correct_capitalization() {
     let input = format!("{}\nArchitecture[name='test']", MOCK_MANDATORY_BLOCKS);
     let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let cap_errors: Vec<_> = diags
         .iter()
@@ -56,7 +56,7 @@ fn test_all_valid_no_errors() {
     let input = MOCK_MANDATORY_BLOCKS;
 
     let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     assert!(
         diags.is_empty(),
@@ -70,7 +70,7 @@ fn test_missing_mandatory_blocks() {
     // Only Architecture, missing RouteInfo and TransitionInfo
     let input = "Architecture[name='test']";
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     assert_eq!(diags.len(), 2);
     assert!(
@@ -100,7 +100,7 @@ RouteInfo:
     "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     assert_eq!(
         diags.len(),
@@ -127,7 +127,7 @@ RouteInfo:
     "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     assert_eq!(diags.len(), 2, "Should have 2 errors: duplicate + missing");
 
@@ -155,7 +155,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -199,7 +199,7 @@ TransitionInfo:
     assert!(has_struct, "RouteInfo should contain a struct definition");
 
     // Should still pass semantic checks
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -222,7 +222,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let warnings: Vec<_> = diags
         .iter()
@@ -257,7 +257,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let warnings: Vec<_> = diags
         .iter()
@@ -295,7 +295,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let warnings: Vec<_> = diags
         .iter()
@@ -320,7 +320,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let warnings: Vec<_> = diags
         .iter()
@@ -361,7 +361,7 @@ fn test_semantic_checks_work_with_bracket_syntax() {
     "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     assert!(
         diags.is_empty(),
         "Semantics should work for Bracket syntax too"
@@ -381,7 +381,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -409,7 +409,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -436,7 +436,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -457,12 +457,13 @@ RouteInfo:
     routed_gates = CX
     realize_gate = []
 TransitionInfo:
+    Transition{edge : (Location,Location)}
     cost = 1.0
-    apply = value_swap(Transition.edge.0, Transition.edge.1)
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     get_transitions = []
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -490,7 +491,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -517,7 +518,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -544,7 +545,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -558,6 +559,13 @@ TransitionInfo:
     );
 }
 
+// TODO this test is failing because of generic type inference.
+// we will need to run generic type inference MULTIPLE times to get to the root.
+// we need to run it as many times as there are generic types in the expression,
+// since T1 could depend on T0 being resolved.
+// so, should either have a way to count how many generic types there are,
+// OR have a way to keep going "until the job is done", which is likely more
+// complex than it's worth, since avoiding infinite loop case seems tough.
 #[test]
 fn test_map_function_with_lambda() {
     let input = r#"
@@ -571,7 +579,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -598,7 +606,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let errors: Vec<_> = diags
         .iter()
@@ -620,7 +628,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let undefined_errors: Vec<_> = diags
         .iter()
@@ -646,7 +654,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let undefined_errors: Vec<_> = diags
         .iter()
@@ -670,7 +678,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -695,7 +703,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -722,7 +730,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -747,7 +755,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -775,7 +783,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))

@@ -37,23 +37,17 @@ pub fn byte_to_position(text: &str, byte_idx: usize) -> (u32, u32) {
 /// Returns Some if the position exists, with the char
 pub fn get_char_at(text: &str, position: Position) -> Option<char> {
     let mut cur_line = 0;
-    let mut cur_offset: Option<u32> = Some(0);
+    let mut cur_offset = 0;
     for char in text.chars() {
-        if cur_line == position.line
-            && cur_offset.is_some()
-            && cur_offset.unwrap() == position.character
-        {
+        if cur_line == position.line && cur_offset == position.character {
             return Some(char);
         } else if cur_line > position.line {
             return None;
         } else if char == '\n' {
             cur_line += 1;
-            cur_offset = None;
+            cur_offset = 0
         } else {
-            cur_offset = match cur_offset {
-                None => Some(0),
-                Some(i) => Some(i + 1),
-            };
+            cur_offset += 1;
         }
     }
     None
@@ -227,5 +221,20 @@ pub fn find_finishing_subexpr(expr: &Expr, goal_position: Position) -> Option<&E
             ExprKind::Projection { tuple, .. } => find_finishing_subexpr(tuple, goal_position),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_get_char_at() {
+        let text = "abc\ndef";
+
+        assert_eq!(Some('a'), get_char_at(text, Position::new(0, 0)));
+        assert_eq!(Some('b'), get_char_at(text, Position::new(0, 1)));
+        assert_eq!(Some('d'), get_char_at(text, Position::new(1, 0)));
     }
 }

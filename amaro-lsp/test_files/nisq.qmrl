@@ -12,4 +12,4 @@ TransitionInfo:
     apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     cost = if (Transition.edge)==(Location(0), Location(0))
             then 0.0
-            else 1.0 
+            else 1.0

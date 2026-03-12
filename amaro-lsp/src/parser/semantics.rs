@@ -2,15 +2,15 @@ use super::symbols::*;
 use crate::{ast::*, info::builtins};
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, Diagnostic,
-    DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range, Url,
+    CompletionItem, CompletionItemLabelDetails, Diagnostic, DiagnosticRelatedInformation,
+    DiagnosticSeverity, Location, Range, Url,
 };
 
 /// Performs semantic analysis on a parsed Amaro file.
 ///
 /// Validates block structure, required fields, and type correctness.
 /// Returns diagnostics for LSP clients.
-pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
+pub fn check_semantics(file: &AmaroFile) -> (Vec<Diagnostic>, HashMap<NodeId, Type>, UserDefTable) {
     let mut diagnostics = Vec::new();
 
     let known_blocks = [
@@ -34,6 +34,7 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
     let mut found_blocks: HashMap<String, Range> = HashMap::new();
 
     let user_def_table = UserDefTable::new(file);
+    let mut type_map = TypeMap::new();
 
     // Block Level Validation
     for block in &file.blocks {
@@ -79,7 +80,7 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
 
         // 3. Type Check all fields
         let mut sym_table = SymbolTable::new();
-        let mut type_map: HashMap<NodeId, Type> = HashMap::new();
+
         let mut present_keys: Vec<&str> = Vec::new();
         let BlockContent::Fields(items) = &block.content;
         for item in items {
@@ -132,7 +133,7 @@ pub fn check_semantics(file: &AmaroFile) -> Vec<Diagnostic> {
         }
     }
 
-    diagnostics
+    (diagnostics, type_map.map, user_def_table)
 }
 
 /// Validates that gate identifiers are recognized gate types (CX, T, Pauli, PauliMeasurement).
@@ -162,12 +163,123 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
+pub struct TypeMap {
+    map: HashMap<NodeId, Type>,
+}
+
+impl Default for TypeMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeMap {
+    pub fn new() -> TypeMap {
+        TypeMap {
+            map: HashMap::new(),
+        }
+    }
+    /// HashMap get for compatibility
+    pub fn get(&self, id: &NodeId) -> Option<&Type> {
+        self.map.get(id)
+    }
+
+    /// Sets the value in the map.
+    /// overlay is preferred, as this will set the value to the new type,
+    /// not overlay it.
+    pub fn set(&mut self, id: NodeId, typ: Type) -> Option<Type> {
+        self.map.insert(id, typ)
+    }
+
+    /// Updates the type in the type map
+    /// If no type exists, then simply puts the type in there.
+    /// If a type does already exist, then attempts to just overlay the generics
+    /// and unknowns, leaving the remaining structure unchanged, in an attempt
+    /// to make a more specific type.
+    pub fn overlay(&mut self, id: NodeId, new_type: &Type) {
+        match self.map.get_mut(&id) {
+            Some(prev_type) => overlay_type(prev_type, new_type),
+            None => {
+                self.set(id, new_type.clone());
+            }
+        }
+    }
+}
+
+/// Overlays one type onto another.
+/// When we "overlay" a type, we are providing more specific information about
+/// the background type. If the background type contains a generic or unknown
+/// in the same place that the foreground type contains something real, then
+/// the background type has its values replaced with those in the foreground
+/// type, so that we produce a strictly more-specific type.
+///
+/// Think of this like in image editing, where we overlay a foreground onto
+/// a background. Generics and unknowns are transparent pixels.
+pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) {
+    match background_type {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Location
+        | Type::Qubit
+        | Type::QubitMap
+        | Type::Gate
+        | Type::ArchT
+        | Type::StateT
+        | Type::InstrT
+        | Type::UserDef(_) => {}
+        Type::Vec(b_inner) => {
+            if let Type::Vec(f_inner) = foreground_type {
+                overlay_type(b_inner, f_inner);
+            }
+        }
+        Type::Tuple(b_items) => {
+            if let Type::Tuple(f_items) = foreground_type {
+                b_items
+                    .iter_mut()
+                    .zip(f_items.iter())
+                    .for_each(|elt| overlay_type(elt.0, elt.1));
+            }
+        }
+        Type::Option(b_inner) => {
+            if let Type::Option(f_inner) = foreground_type {
+                overlay_type(b_inner, f_inner);
+            }
+        }
+        Type::Function {
+            params: b_params,
+            return_type: b_ret,
+        } => {
+            if let Type::Function {
+                params: f_params,
+                return_type: f_ret,
+            } = foreground_type
+            {
+                b_params
+                    .iter_mut()
+                    .zip(f_params.iter())
+                    .for_each(|elt| overlay_type(elt.0, elt.1));
+                overlay_type(b_ret, f_ret);
+            }
+        }
+        Type::Generic(_) => {
+            if !matches!(foreground_type, Type::Unknown) {
+                *background_type = foreground_type.clone();
+            }
+        }
+        Type::Unknown => {
+            *background_type = foreground_type.clone();
+        }
+    }
+}
+
 /// Aggregate of the args passed to infer_expr_type,
 /// so we can easily change these without having to change 10000 call signatures
 pub struct InferenceData<'a> {
     pub sym_table: &'a mut SymbolTable,
     pub diagnostics: &'a mut Vec<Diagnostic>,
-    pub type_map: &'a mut HashMap<NodeId, Type>,
+    pub type_map: &'a mut TypeMap,
     pub user_def_table: &'a UserDefTable,
 }
 
@@ -183,28 +295,39 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
         ExprKind::StringLiteral(_) => Type::String,
         ExprKind::None => Type::Option(Box::new(Type::Unknown)),
         ExprKind::Identifier(name) => {
-            match builtins::get_raw_built_in(name.as_str()) {
-                Some(built_in) => built_in.typ.clone(),
-                None => inference_data
-                    .sym_table
-                    .lookup(name)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        // check for user defined type
-                        match inference_data.user_def_table.get_fields(name) {
-                            Some(_) => Type::UserDef(name.clone()),
-                            None => {
-                                inference_data.diagnostics.push(Diagnostic {
-                                    range: expr.range,
-                                    severity: Some(DiagnosticSeverity::ERROR),
-                                    message: format!("Undefined variable '{}'.", name),
-                                    ..Default::default()
-                                });
-                                Type::Unknown
-                            }
-                        }
-                    }),
-            }
+            // always first look up in symbol table
+            inference_data
+                .sym_table
+                .lookup(name)
+                .cloned()
+                .unwrap_or_else(|| {
+                    // if not in symbol table, check if we already have given this
+                    // expression a type
+                    inference_data
+                        .type_map
+                        .get(&expr.id)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            // check built-ins
+
+                            builtins::get_raw_built_in(name.as_str())
+                                .map(|elt| elt.typ.clone())
+                                .unwrap_or_else(|| {
+                                    match inference_data.user_def_table.get_fields(name) {
+                                        Some(_) => Type::UserDef(name.clone()),
+                                        None => {
+                                            inference_data.diagnostics.push(Diagnostic {
+                                                range: expr.range,
+                                                severity: Some(DiagnosticSeverity::ERROR),
+                                                message: format!("Undefined variable '{}'.", name),
+                                                ..Default::default()
+                                            });
+                                            Type::Unknown
+                                        }
+                                    }
+                                })
+                        })
+                })
         }
         ExprKind::List(items) => {
             if items.is_empty() {
@@ -237,18 +360,48 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             Type::Option(Box::new(inner_type))
         }
         ExprKind::Lambda { params, body } => {
-            inference_data.sym_table.enter_scope();
-            let mut param_types = Vec::new();
-            for param in params {
-                inference_data.sym_table.bind(param.clone(), Type::Unknown);
-                param_types.push(Type::Unknown);
-            }
-            let return_type = infer_expr_type(body, inference_data);
-            inference_data.sym_table.exit_scope();
+            // with lambda:
+            // sometimes we will be rerunning this function to determine generics
+            // if we do, then we provide some information about the lambda and use this
+            // to gain additional information about the lambda.
 
-            Type::Function {
-                params: param_types,
-                return_type: Box::new(return_type),
+            // LS TODO: Repeat code. Make it cleaner
+            if let Some(Type::Function {
+                params: fcn_params, ..
+            }) = inference_data.type_map.get(&expr.id)
+            {
+                inference_data.sym_table.enter_scope();
+
+                let mut param_types = Vec::new();
+                for (param_name, param_type) in params.iter().zip(fcn_params) {
+                    inference_data
+                        .sym_table
+                        .bind(param_name.clone(), param_type.clone());
+                    param_types.push(param_type.clone());
+                }
+
+                let found_return_type = infer_expr_type(body, inference_data);
+                inference_data.sym_table.exit_scope();
+
+                Type::Function {
+                    params: param_types,
+                    return_type: Box::new(found_return_type),
+                }
+            } else {
+                // do the normal way if no mapping exists (or if mapping is bizarre)
+                inference_data.sym_table.enter_scope();
+                let mut param_types = Vec::new();
+                for param in params {
+                    inference_data.sym_table.bind(param.clone(), Type::Unknown);
+                    param_types.push(Type::Unknown);
+                }
+                let return_type = infer_expr_type(body, inference_data);
+                inference_data.sym_table.exit_scope();
+
+                Type::Function {
+                    params: param_types,
+                    return_type: Box::new(return_type),
+                }
             }
         }
         ExprKind::LetBinding { name, value, body } => {
@@ -289,8 +442,10 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             then_type
         }
         ExprKind::FunctionCall { function, args } => {
-            let func_type = infer_expr_type(function, inference_data);
-            match func_type {
+            infer_expr_type(function, inference_data);
+            let fcn_type = (*inference_data.type_map.get(&function.id).as_ref().unwrap()).clone(); // always there
+            match &fcn_type {
+                Type::Unknown => Type::Unknown,
                 Type::Function {
                     params,
                     return_type,
@@ -306,40 +461,100 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             ),
                             ..Default::default()
                         });
-                        return *return_type;
-                    }
-                    for (i, (param_type, arg)) in params.iter().zip(args).enumerate() {
-                        let arg_type = infer_expr_type(arg, inference_data);
+                        (**return_type).clone()
+                    } else if contains_generic(&fcn_type) {
+                        // need to do some generic stuff
 
-                        // Following Logic
-                        // 1. If param_type Unknown, Accept
-                        // 2. If arg_type Unknown, Accept (Avoid Cascading Errors)
-                        // 3. Otherwise, Check Compatibility
-                        if *param_type != Type::Unknown
-                            && arg_type != Type::Unknown
-                            && !types_compatible(param_type, &arg_type)
-                        {
+                        // 1. get inferred types of all args and return type
+                        // 2. using inferred types, try to build generic map as best as can
+                        // 3. retype all the expressions using generic map as best as can
+                        // 4. if still contains generic type, return to 1
+
+                        let mut generic_map = HashMap::new();
+                        let inferred_args: Vec<Type> = args
+                            .iter()
+                            .map(|elt| infer_expr_type(elt, inference_data))
+                            .collect();
+                        let outcome = inferred_args
+                            .iter()
+                            .zip(params)
+                            .map(|(actual_arg, generic_param)| {
+                                infer_generic_type(generic_param, actual_arg, &mut generic_map)
+                            })
+                            .collect::<Result<Vec<_>, _>>();
+
+                        if let Err(t) = outcome {
                             inference_data.diagnostics.push(Diagnostic {
-                                range: arg.range,
+                                range: expr.range,
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 message: format!(
-                                    "Argument {} expected type '{:?}' but got '{:?}'.",
-                                    i + 1,
-                                    param_type,
-                                    arg_type
+                                    "Issue when inferring generics of function call: {}",
+                                    t
                                 ),
                                 ..Default::default()
                             });
+                            inference_data.type_map.overlay(expr.id, &Type::Unknown);
+                            return Type::Unknown;
                         }
+
+                        if generic_map.is_empty() {
+                            // cannot resolve any more generics
+                            // end normally
+                            (**return_type).clone()
+                        } else {
+                            // degenerisize now
+                            for (param_type, arg) in params.iter().zip(args) {
+                                let (_, t) = degenerisize(param_type, &generic_map);
+                                retype(arg, t, inference_data);
+                            }
+
+                            // degenerisize whole function
+                            let (_, t) = degenerisize(&fcn_type, &generic_map);
+                            retype(function, t.clone(), inference_data);
+
+                            // then, infer again on this expr to see if we're done
+                            // should be slowly removing generic types i think
+
+                            return infer_expr_type(expr, inference_data);
+                            // } else {
+                            //     (**return_type).clone()
+                            // }
+                        }
+                    } else {
+                        for (i, (param_type, arg)) in params.iter().zip(args).enumerate() {
+                            let arg_type = infer_expr_type(arg, inference_data);
+
+                            // Following Logic
+                            // 1. If param_type Unknown, Accept
+                            // 2. If arg_type Unknown, Accept (Avoid Cascading Errors)
+                            // 3. Otherwise, Check Compatibility
+                            if *param_type != Type::Unknown
+                                && arg_type != Type::Unknown
+                                && !types_compatible(param_type, &arg_type)
+                            {
+                                inference_data.diagnostics.push(Diagnostic {
+                                    range: arg.range,
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    message: format!(
+                                        "Argument {} expected type '{:?}' but got '{:?}'.",
+                                        i + 1,
+                                        param_type,
+                                        arg_type
+                                    ),
+                                    ..Default::default()
+                                });
+                            }
+                        }
+
+                        (**return_type).clone()
                     }
-                    *return_type
                 }
-                Type::Unknown => Type::Unknown, // Avoid Cascading Errors
                 _ => {
                     inference_data.diagnostics.push(Diagnostic {
-                        range: function.range,
+                        range: expr.range,
                         severity: Some(DiagnosticSeverity::ERROR),
-                        message: "Attempted to call a non-function value.".to_string(),
+                        message: "Could not determine type of function.".to_string(),
+
                         ..Default::default()
                     });
                     Type::Unknown
@@ -629,7 +844,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             }
         }
     };
-    inference_data.type_map.insert(expr.id, found_type.clone());
+    inference_data.type_map.overlay(expr.id, &found_type);
 
     found_type
 }
@@ -747,78 +962,18 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
                 && p1.iter().zip(p2).all(|(a, b)| types_compatible(a, b))
                 && types_compatible(r1, r2)
         }
+        (Type::UserDef(n1), Type::UserDef(n2)) => n1 == n2,
 
         _ => false,
     }
 }
 
-/// An autocomplete suggestion to show.
-/// Contains the replacement text along with the completion type.
-/// Modify this in order to most easily change the information provided in the
-/// autocomplete window.
-#[derive(PartialEq, Debug)]
-pub struct Suggestion {
-    pub completion_text: String,
-    pub completion_type: Type,
-}
-
-impl Suggestion {
-    fn get_completion_item_kind(&self) -> CompletionItemKind {
-        match &self.completion_type {
-            Type::Int => CompletionItemKind::FIELD,
-            Type::Float => CompletionItemKind::FIELD,
-            Type::Bool => CompletionItemKind::FIELD,
-            Type::String => CompletionItemKind::FIELD,
-            Type::Location => CompletionItemKind::STRUCT,
-            Type::Qubit => CompletionItemKind::STRUCT,
-            Type::QubitMap => CompletionItemKind::STRUCT,
-            Type::Gate => CompletionItemKind::STRUCT,
-            Type::ArchT => CompletionItemKind::STRUCT,
-            Type::StateT => CompletionItemKind::STRUCT,
-            Type::InstrT => CompletionItemKind::STRUCT,
-            Type::Vec(..) => CompletionItemKind::VARIABLE,
-            Type::Tuple(..) => CompletionItemKind::VARIABLE,
-            Type::Option(..) => CompletionItemKind::ENUM,
-            Type::Function { .. } => CompletionItemKind::FUNCTION,
-            //Type::Struct { .. } => CompletionItemKind::STRUCT,
-            Type::UserDef(..) => CompletionItemKind::STRUCT,
-            _ => CompletionItemKind::CONSTANT,
-        }
-    }
-
-    fn get_completion_item_label_details(&self) -> CompletionItemLabelDetails {
-        CompletionItemLabelDetails {
-            detail: match &self.completion_type {
-                Type::Vec(..) => Some(": Array".to_string()),
-                Type::Tuple(..) => Some(": Tuple".to_string()),
-                Type::Function { .. } => Some(": Function".to_string()),
-                Type::UserDef { .. } => Some(": Struct".to_string()),
-                _ => None,
-            },
-            description: Some(format!("{}", self.completion_type)),
-        }
-    }
-
-    fn get_completion_item_detail(&self) -> String {
-        format!("{}", self.completion_type)
-    }
-
-    /// Converts from a Suggestion to a CompletionItem.
-    /// The LSP uses CompletionItems.
-    pub fn to_completion_item(&self) -> CompletionItem {
-        CompletionItem {
-            label: self.completion_text.clone(),
-            label_details: Some(self.get_completion_item_label_details()),
-            kind: Some(self.get_completion_item_kind()),
-            detail: Some(self.get_completion_item_detail()),
-            ..Default::default()
-        }
-    }
-}
-
 /// From a given type, provides all autocomplete suggestions, if they exist.
 /// This would be what appears after the user types a '.'
-pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Option<Vec<Suggestion>> {
+pub fn suggest_next_from_type(
+    t1: &Type,
+    user_def_table: &UserDefTable,
+) -> Option<Vec<CompletionItem>> {
     match t1 {
         Type::Tuple(items) => {
             // show autocomplete for each item
@@ -829,9 +984,15 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
                     items
                         .iter()
                         .enumerate()
-                        .map(|(index, item)| Suggestion {
-                            completion_text: format!("{}", index),
-                            completion_type: item.clone(),
+                        .map(|(index, item)| CompletionItem {
+                            label: format!("({})", index),
+                            label_details: Some(CompletionItemLabelDetails {
+                                detail: None,
+                                description: Some(format!("{}", item)),
+                            }),
+                            kind: None,
+                            detail: None,
+                            ..Default::default()
                         })
                         .collect(),
                 )
@@ -840,35 +1001,30 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
         Type::UserDef(name) => user_def_table.get_fields(name).map(|hashmap| {
             hashmap
                 .iter()
-                .map(|entry| Suggestion {
-                    completion_text: entry.0.clone(),
-                    completion_type: entry.1.clone(),
+                .map(|entry| CompletionItem {
+                    label: entry.0.clone(),
+                    label_details: Some(CompletionItemLabelDetails {
+                        detail: None,
+                        description: Some(format!("{}", entry.1)),
+                    }),
+                    kind: None,
+                    detail: None,
+                    ..Default::default()
                 })
                 .collect()
         }),
         _ => {
-
             // all other types, we need to check if there are any built-ins
             if let Some(built_ins) = builtins::get_all_built_ins_after_type(t1) {
                 match built_ins {
                     // TODO: I do not like this ownership structure I created in
                     // fighting the borrow checker.
-                    builtins::Owner::Owned(vec) => Some(
-                        vec.iter()
-                            .map(|elt| Suggestion {
-                                completion_text: elt.identifier.clone(),
-                                completion_type: elt.typ.clone(),
-                            })
-                            .collect(),
-                    ),
-                    builtins::Owner::Borrowed(vec) => Some(
-                        vec.iter()
-                            .map(|elt| Suggestion {
-                                completion_text: elt.identifier.clone(),
-                                completion_type: elt.typ.clone(),
-                            })
-                            .collect(),
-                    ),
+                    builtins::Owner::Owned(vec) => {
+                        Some(vec.iter().map(|elt| elt.to_completion_item(None)).collect())
+                    }
+                    builtins::Owner::Borrowed(vec) => {
+                        Some(vec.iter().map(|elt| elt.to_completion_item(None)).collect())
+                    }
                 }
             } else {
                 None
@@ -877,9 +1033,15 @@ pub fn suggest_next_from_type(t1: &Type, user_def_table: &UserDefTable) -> Optio
     }
 }
 
-/// Suppose we have a type which includes some generics. For instance,
-/// map<I,O>(|O| -> I, Vec<I>) has two generics. We want to be able to infer
-/// what I and O are by looking at the generic type and the actual type.
+/// Suppose we have a type which includes some generics.
+/// Knowing the actual type, we can create a mapping from generic types
+/// to their actual types.
+/// For instance, map<I,O>(|O| -> I, Vec<I>) has two generics. We want to be
+/// able to infer what I and O are by looking at the generic type and the actual type.
+///
+/// This does its best without modifying any types or looking at the expressions.
+/// Meaning, it cannot make all the inferences alone, and may need to be re-ran
+/// if there are complex structures at play.
 ///
 /// Stops at first error. Could aggregate them if we wanted, but this should
 /// be sufficient for now.
@@ -1001,39 +1163,200 @@ pub fn infer_generic_type(
     }
 }
 
-/// Given a type that we know has generics, and a generic map which maps from
-/// the generic IDs to their actual types, reconstructs the actual type by
-/// substituting in the generics with the types in the map. If a generic is not
-/// found, then an error is provided with the ID of the not found generic.
-pub fn degenerisize(
-    type_with_generics: &Type,
-    generic_map: &HashMap<u8, Type>,
-) -> Result<Type, u8> {
-    match type_with_generics {
-        Type::Generic(c) => match generic_map.get(c) {
-            Some(t) => Ok(t.clone()),
-            None => Err(*c),
-        },
-        Type::Vec(inner) => Ok(Type::Vec(Box::new(degenerisize(inner, generic_map)?))),
-        Type::Tuple(items) => Ok(Type::Tuple(
-            items
-                .iter()
-                .map(|elt| degenerisize(elt, generic_map))
-                .collect::<Result<Vec<_>, _>>()?,
-        )),
-        Type::Option(inner) => Ok(Type::Option(Box::new(degenerisize(inner, generic_map)?))),
+pub fn contains_unknown(typ: &Type) -> bool {
+    match typ {
+        Type::Int => false,
+        Type::Float => false,
+        Type::Bool => false,
+        Type::String => false,
+        Type::Location => false,
+        Type::Qubit => false,
+        Type::QubitMap => false,
+        Type::Gate => false,
+        Type::ArchT => false,
+        Type::StateT => false,
+        Type::InstrT => false,
+        Type::Vec(inner) => contains_unknown(inner),
+        Type::Tuple(items) => items.iter().any(contains_unknown),
+        Type::Option(inner) => contains_unknown(inner),
         Type::Function {
             params,
             return_type,
-        } => Ok(Type::Function {
-            params: params
-                .iter()
-                .map(|elt| degenerisize(elt, generic_map))
-                .collect::<Result<Vec<_>, _>>()?,
-            return_type: Box::new(degenerisize(return_type, generic_map)?),
-        }),
-        Type::Unknown => Ok(Type::Unknown),
-        _ => Ok(type_with_generics.clone()),
+        } => params.iter().any(contains_unknown) || contains_unknown(return_type),
+        Type::UserDef(_) => false,
+        Type::Generic(_) => false,
+        Type::Unknown => true,
+    }
+}
+
+pub fn contains_generic(typ: &Type) -> bool {
+    match typ {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Location
+        | Type::Qubit
+        | Type::QubitMap
+        | Type::Gate
+        | Type::ArchT
+        | Type::StateT
+        | Type::InstrT
+        | Type::UserDef(_)
+        | Type::Unknown => false,
+        Type::Vec(t) => contains_generic(t),
+        Type::Tuple(items) => items.iter().any(contains_generic),
+        Type::Option(t) => contains_generic(t),
+        Type::Function {
+            params,
+            return_type,
+        } => params.iter().any(contains_generic) || contains_generic(return_type),
+        Type::Generic(_) => true,
+    }
+}
+
+/// Given an expression, changes its type to a new type. Does so recursively.
+/// This is helpful for if we have some type that uses generics where we cannot
+/// determine the type, then later discover the generic type.
+/// For instance, if we have something with the type "|?| -> Vec<?>", we can
+/// come back and tell it that it is actually "|Int| -> Vec<Float>". It will
+/// recursively (as best it can) retype all the subexpressions to match this
+/// format.
+/// Doesn't retype identifiers...
+pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
+    // eprintln!("Retyping {} from {} to {}", expr.kind, inference_data.type_map.get(&expr.id).unwrap(), new_type);
+    // eprintln!("  Range: {:?}", expr.range);
+
+    inference_data.type_map.overlay(expr.id, &new_type);
+    // TODO: Can infer function return type this way, but don't have a good
+    // method for doing this right now.
+    match &expr.kind {
+        ExprKind::Identifier(_) => {}
+        ExprKind::IntLiteral(_) => {}
+        ExprKind::FloatLiteral(_) => {}
+        ExprKind::StringLiteral(_) => {}
+        ExprKind::BoolLiteral(_) => {}
+        ExprKind::List(exprs) => {
+            // retype all sub expressions
+            if let Type::Vec(ref inner) = new_type {
+                exprs
+                    .iter()
+                    .for_each(|elt| retype(elt, *inner.clone(), inference_data));
+            }
+        }
+        ExprKind::Tuple(exprs) => {
+            // retype all sub expressions
+            if let Type::Tuple(ref inners) = new_type {
+                exprs
+                    .iter()
+                    .zip(inners.iter())
+                    .for_each(|pair| retype(pair.0, pair.1.clone(), inference_data));
+            }
+        }
+        ExprKind::StructLiteral { .. } => {
+            // nothing special to do here
+        }
+        ExprKind::FunctionCall { .. } => {
+            // nothing special to do here
+        }
+        ExprKind::FieldAccess { .. } => {
+            // nothing special to do here
+        }
+        ExprKind::IndexAccess { object, .. } => {
+            // can retype the object as a vec of elements of this type
+            retype(
+                object,
+                Type::Vec(Box::new(new_type.clone())),
+                inference_data,
+            );
+        }
+        ExprKind::Lambda { body, .. } => {
+            // body of lambda should have this return type
+            if let Type::Function {
+                ref return_type, ..
+            } = new_type
+            {
+                retype(body, *return_type.clone(), inference_data);
+            }
+        }
+        ExprKind::IfThenElse {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            // the type of the expr is just the type of both branches
+            retype(then_branch, new_type.clone(), inference_data);
+            retype(else_branch, new_type.clone(), inference_data);
+        }
+        ExprKind::LetBinding { body, .. } => {
+            // return type of body is the type of whole let expr
+            retype(body, new_type.clone(), inference_data);
+        }
+        ExprKind::BinaryOp { .. } => todo!(), // a lot to do here hmm
+        ExprKind::UnaryOp { .. } => todo!(),  // a lot to do here hmm
+        ExprKind::Some(inner) => {
+            // can retype inner too
+            if let Type::Option(ref inner_type) = new_type {
+                retype(inner, *inner_type.clone(), inference_data);
+            }
+        }
+        ExprKind::None => {
+            // nothing special here
+        }
+        ExprKind::TensorProduct { .. } => {
+            // don't know what to do here really
+        }
+        ExprKind::Projection { .. } => {
+            // very non-trivial to retype descent, so this should be OK
+        }
+    }
+}
+
+/// Given a type that we know has generics, and a generic map which maps from
+/// the generic IDs to their actual types, reconstructs the actual type by
+/// substituting in the generics with the types in the map.
+/// If the first entry in the tuple is false, then there are still unresolved
+/// generics. It likely means that there is a dependency of one generic on
+/// another, which can (hopefully) be resolved by making substitutions and then
+/// repeating the generic inference process.
+pub fn degenerisize(type_with_generics: &Type, generic_map: &HashMap<u8, Type>) -> (bool, Type) {
+    match type_with_generics {
+        Type::Generic(c) => match generic_map.get(c) {
+            Some(t) => (true, t.clone()),
+            None => (false, Type::Generic(*c)),
+        },
+        Type::Vec(inner) => {
+            let contents = degenerisize(inner, generic_map);
+            (contents.0, Type::Vec(Box::new(contents.1)))
+        }
+        Type::Tuple(items) => {
+            let results = items.iter().map(|elt| degenerisize(elt, generic_map));
+            let done = results.clone().all(|b| b.0);
+
+            (done, Type::Tuple(results.map(|elt| elt.1).collect()))
+        }
+        Type::Option(inner) => {
+            let contents = degenerisize(inner, generic_map);
+            (contents.0, Type::Option(Box::new(contents.1)))
+        }
+        Type::Function {
+            params,
+            return_type,
+        } => {
+            let params_results = params.iter().map(|elt| degenerisize(elt, generic_map));
+            let return_type_results = degenerisize(return_type, generic_map);
+            let done = params_results.clone().all(|b| b.0) && return_type_results.0;
+
+            (
+                done,
+                Type::Function {
+                    params: params_results.map(|elt| elt.1).collect(),
+                    return_type: Box::new(return_type_results.1),
+                },
+            )
+        }
+        Type::Unknown => (true, Type::Unknown),
+        _ => (true, type_with_generics.clone()),
     }
 }
 
@@ -1113,7 +1436,7 @@ mod tests {
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
-            type_map: &mut HashMap::new(),
+            type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
         };
 
@@ -1251,7 +1574,6 @@ mod tests {
             Type::Location,
             infer_expr_type(&expr_loc_autocast, &mut inf_data)
         );
-        println!("{:?}", inf_data.diagnostics);
         assert_eq!(inf_data.diagnostics.len(), 0);
         assert_eq!(
             Type::Qubit,
@@ -1269,7 +1591,7 @@ mod tests {
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
-            type_map: &mut HashMap::new(),
+            type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
         };
 
@@ -1344,7 +1666,7 @@ mod tests {
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
-            type_map: &mut HashMap::new(),
+            type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
         };
 
@@ -1431,105 +1753,124 @@ mod tests {
         let arch_res = suggest_next_from_type(&Type::ArchT, &user_def_table);
         assert!(arch_res.is_some());
         let arch_res = arch_res.unwrap();
-        assert_eq!(
-            arch_res,
-            vec![
-                Suggestion {
-                    completion_text: "width".to_string(),
-                    completion_type: Type::Int,
-                },
-                Suggestion {
-                    completion_text: "height".to_string(),
-                    completion_type: Type::Int,
-                },
-                Suggestion {
-                    completion_text: "stack_size".to_string(),
-                    completion_type: Type::Int,
-                },
-                Suggestion {
-                    completion_text: "edges".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![
-                            Type::Location,
-                            Type::Location,
-                        ])))),
-                    },
-                },
-                Suggestion {
-                    completion_text: "succ_rates".to_string(),
-                    completion_type: Type::Vec(Box::new(Type::Vec(Box::new(Type::Float)))),
-                },
-                Suggestion {
-                    completion_text: "contains_edge".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
-                        return_type: Box::new(Type::Bool),
-                    },
-                },
-                Suggestion {
-                    completion_text: "magic_state_qubits".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-                    },
-                },
-                Suggestion {
-                    completion_text: "alg_qubits".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-                    },
-                }
-            ]
+
+        let height_type_name = format!("{}", Type::Int);
+
+        let edges_type_name = format!(
+            "{}",
+            Type::Function {
+                params: vec![],
+                return_type: Box::new(Type::Vec(Box::new(Type::Tuple(vec![
+                    Type::Location,
+                    Type::Location,
+                ])))),
+            }
+        );
+
+        assert!(
+            arch_res
+                .iter()
+                .find(|elt| if elt.label == "height" {
+                    if let Some(CompletionItemLabelDetails { description, .. }) = &elt.label_details
+                    {
+                        description.is_some()
+                            && description.as_ref().unwrap().as_str() == height_type_name
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                })
+                .is_some()
+        );
+
+        assert!(
+            arch_res
+                .iter()
+                .find(|elt| if elt.label == "edges" {
+                    if let Some(CompletionItemLabelDetails { description, .. }) = &elt.label_details
+                    {
+                        description.is_some()
+                            && description.as_ref().unwrap().as_str() == edges_type_name
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                })
+                .is_some()
         );
 
         let vec_res = suggest_next_from_type(&Type::Vec(Box::new(Type::QubitMap)), &user_def_table);
         assert!(vec_res.is_some());
         let vec_res = vec_res.unwrap();
-        assert_eq!(
-            vec_res,
-            vec![
-                Suggestion {
-                    completion_text: "push".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![Type::QubitMap],
-                        return_type: Box::new(Type::Vec(Box::new(Type::QubitMap))),
-                    },
-                },
-                Suggestion {
-                    completion_text: "pop".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Option(Box::new(Type::QubitMap))),
-                    },
-                },
-                Suggestion {
-                    completion_text: "extend".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![Type::Vec(Box::new(Type::QubitMap))],
-                        return_type: Box::new(Type::Vec(Box::new(Type::QubitMap))),
-                    },
-                },
-                Suggestion {
-                    completion_text: "is_empty".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![],
-                        return_type: Box::new(Type::Bool),
-                    },
-                },
-                Suggestion {
-                    completion_text: "contains".to_string(),
-                    completion_type: Type::Function {
-                        params: vec![Type::QubitMap],
-                        return_type: Box::new(Type::Bool),
-                    },
-                },
-                Suggestion {
-                    completion_text: "len".to_string(),
-                    completion_type: Type::Int,
-                }
-            ]
+
+        let push_type_name = format!(
+            "{}",
+            Type::Function {
+                params: vec![Type::QubitMap],
+                return_type: Box::new(Type::Vec(Box::new(Type::QubitMap))),
+            }
+        );
+        let contains_type_name = format!(
+            "{}",
+            Type::Function {
+                params: vec![Type::QubitMap],
+                return_type: Box::new(Type::Bool),
+            }
+        );
+
+        let len_type_name = format!("{}", Type::Int);
+
+        assert!(
+            vec_res
+                .iter()
+                .find(|elt| if elt.label == "push" {
+                    if let Some(CompletionItemLabelDetails { description, .. }) = &elt.label_details
+                    {
+                        description.is_some()
+                            && description.as_ref().unwrap().as_str() == push_type_name
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                })
+                .is_some()
+        );
+
+        assert!(
+            vec_res
+                .iter()
+                .find(|elt| if elt.label == "contains" {
+                    if let Some(CompletionItemLabelDetails { description, .. }) = &elt.label_details
+                    {
+                        description.is_some()
+                            && description.as_ref().unwrap().as_str() == contains_type_name
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                })
+                .is_some()
+        );
+
+        assert!(
+            vec_res
+                .iter()
+                .find(|elt| if elt.label == "len" {
+                    if let Some(CompletionItemLabelDetails { description, .. }) = &elt.label_details
+                    {
+                        description.is_some()
+                            && description.as_ref().unwrap().as_str() == len_type_name
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                })
+                .is_some()
         );
     }
 }

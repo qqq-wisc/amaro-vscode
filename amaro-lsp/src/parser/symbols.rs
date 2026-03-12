@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Write};
 
-use crate::{ast::TypeAnnotation, info::builtins};
+use crate::ast::TypeAnnotation;
 
 /// The type system for Amaro expressions.
 ///
@@ -134,7 +134,7 @@ impl std::fmt::Display for Type {
                 params,
                 return_type,
             } => {
-                f.write_char('(')?;
+                f.write_char('|')?;
                 let mut iter = params.iter();
                 if let Some(first) = iter.next() {
                     write!(f, "{}", first)?;
@@ -143,7 +143,7 @@ impl std::fmt::Display for Type {
                         write!(f, "{}", item)?;
                     }
                 }
-                f.write_str(") -> ")?;
+                f.write_str("| -> ")?;
                 return_type.fmt(f)
             }
             Type::UserDef(name) => f.write_str(name),
@@ -165,21 +165,8 @@ pub struct SymbolTable {
 impl SymbolTable {
     /// Creates a new symbol table with all built-in types and functions registered.
     pub fn new() -> Self {
-        let mut global_scope = HashMap::new();
-
-        builtins::get_all_raw_built_ins().iter().for_each(|elt| 
-            match global_scope.insert(elt.identifier.clone(), elt.typ.clone()) {
-                Some(i) => panic!("Hey! The built-ins gave a definition for two of the same identifier. Duped elt: {}", i),
-                None => {}
-            }
-        );
-
-        // Self::register_context_vars(&mut global_scope);
-        // Self::register_constructors(&mut global_scope);
-        // Self::register_gate_literals(&mut global_scope);
-        // Self::register_builtin_functions(&mut global_scope);
         SymbolTable {
-            scopes: vec![global_scope],
+            scopes: vec![HashMap::new()],
         }
     }
 
@@ -211,190 +198,6 @@ impl SymbolTable {
         }
         None
     }
-
-    /// Registers context variables (Arch, State, Gate, Transition, etc.).
-    fn register_context_vars(scope: &mut HashMap<String, Type>) {
-        scope.insert("Arch".to_string(), Type::ArchT);
-        scope.insert("arch".to_string(), Type::ArchT);
-        scope.insert("State".to_string(), Type::StateT);
-        scope.insert("Gate".to_string(), Type::Gate);
-        scope.insert("step".to_string(), Type::Int);
-        scope.insert(
-            "Transition".to_string(),
-            Type::UserDef("Transition".to_string()),
-        );
-        scope.insert(
-            "GateRealization".to_string(),
-            Type::UserDef("GateRealization".to_string()), // Type::Struct {
-                                                          //     name: "GateRealization".to_string(),
-                                                          //     fields: HashMap::new(),
-                                                          // },
-        );
-    }
-
-    /// Registers type constructors (Location, Qubit, Vec).
-    fn register_constructors(scope: &mut HashMap<String, Type>) {
-        scope.insert(
-            "Qubit".to_string(),
-            Type::Function {
-                params: vec![Type::Int],
-                return_type: Box::new(Type::Qubit),
-            },
-        );
-        scope.insert(
-            "Location".to_string(),
-            Type::Function {
-                params: vec![Type::Int],
-                return_type: Box::new(Type::Location),
-            },
-        );
-        scope.insert(
-            "Vec".to_string(),
-            Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Vec(Box::new(Type::Unknown))),
-            },
-        );
-    }
-
-    /// Registers gate literals (CX, T, Pauli, etc.) as Gate type.
-    fn register_gate_literals(scope: &mut HashMap<String, Type>) {
-        for gate in [
-            "CX",
-            "T",
-            "Pauli",
-            "PauliMeasurement",
-            "H",
-            "CZ",
-            "X",
-            "Y",
-            "Z",
-            "S",
-            "Sdg",
-            "Tdg",
-            "RX",
-            "RY",
-            "RZ",
-        ] {
-            scope.insert(gate.to_string(), Type::Gate);
-        }
-    }
-
-    /// Registers built-in helper functions (map, fold, all_paths, steiner_trees, etc.).
-    fn register_builtin_functions(scope: &mut HashMap<String, Type>) {
-        // Quantum map operations
-        scope.insert(
-            "value_swap".to_string(),
-            Type::Function {
-                params: vec![Type::Location, Type::Location],
-                return_type: Box::new(Type::QubitMap),
-            },
-        );
-
-        scope.insert(
-            "values".to_string(),
-            Type::Function {
-                params: vec![Type::QubitMap],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-
-        scope.insert(
-            "identity_application".to_string(),
-            Type::Function {
-                params: vec![Type::Unknown],
-                return_type: Box::new(Type::Unknown),
-            },
-        );
-
-        // Higher-order
-        scope.insert(
-            "map".to_string(),
-            Type::Function {
-                params: vec![Type::Unknown, Type::Vec(Box::new(Type::Unknown))],
-                return_type: Box::new(Type::Vec(Box::new(Type::Unknown))),
-            },
-        );
-
-        scope.insert(
-            "fold".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::Unknown,
-                    Type::Unknown,
-                    Type::Vec(Box::new(Type::Unknown)),
-                ],
-                return_type: Box::new(Type::Unknown),
-            },
-        );
-
-        // Neighbor functions
-        scope.insert(
-            "vertical_neighbors".to_string(),
-            Type::Function {
-                params: vec![Type::Location, Type::Int, Type::Int],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-        scope.insert(
-            "horizontal_neighbors".to_string(),
-            Type::Function {
-                params: vec![Type::Location, Type::Int],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-
-        // Path functions
-        scope.insert(
-            "path".to_string(),
-            Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-        scope.insert(
-            "tree".to_string(),
-            Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-        scope.insert(
-            "all_paths".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::ArchT,
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::Vec(Box::new(Type::Location)),
-                ],
-                return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))),
-            },
-        );
-        scope.insert(
-            "shortest_path".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::ArchT,
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::Vec(Box::new(Type::Location)),
-                ],
-                return_type: Box::new(Type::Option(Box::new(Type::Vec(Box::new(Type::Location))))),
-            },
-        );
-        scope.insert(
-            "steiner_trees".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::ArchT,
-                    Type::Vec(Box::new(Type::Vec(Box::new(Type::Location)))),
-                    Type::Vec(Box::new(Type::Location)),
-                ],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-    }
 }
 
 impl Default for SymbolTable {
@@ -406,11 +209,13 @@ impl Default for SymbolTable {
 /// There are user-defined types, like Transition.
 /// We need to have ONE place where we store these types.
 /// Then, we can reference these types from here by name.
+#[derive(Debug)]
 pub struct UserDefTable {
     /// maps from type names (like Transition) to their fields
     map: HashMap<String, UserDefEntry>,
 }
 
+#[derive(Debug)]
 struct UserDefEntry {
     fields: HashMap<String, Type>,
 }
