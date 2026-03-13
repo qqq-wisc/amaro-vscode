@@ -84,6 +84,24 @@ pub fn check_semantics(file: &AmaroFile) -> (Vec<Diagnostic>, HashMap<NodeId, Ty
         let mut present_keys: Vec<&str> = Vec::new();
         let BlockContent::Fields(items) = &block.content;
         for item in items {
+            if let BlockItem::ReturnKeyword { range, key } = item {
+                // The field was parsed but its value started with `return`, which is
+                // not valid in expression context. Emit a targeted warning and mark
+                // the field as present so "missing required field" is not also raised.
+                present_keys.push(key.as_str());
+                diagnostics.push(Diagnostic {
+                    range: *range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    message: format!(
+                        "'return' is not valid in field expression context (field '{}').\n\
+                         Amaro uses functional style — remove 'return' and write the expression directly.",
+                        key
+                    ),
+                    ..Default::default()
+                });
+                continue;
+            }
+
             if let BlockItem::Field(field) = item {
                 present_keys.push(field.key.as_str());
 
@@ -93,11 +111,28 @@ pub fn check_semantics(file: &AmaroFile) -> (Vec<Diagnostic>, HashMap<NodeId, Ty
                     type_map: &mut type_map,
                     user_def_table: &user_def_table,
                 };
-                infer_expr_type(&field.value, &mut inf_data);
+                let field_type = infer_expr_type(&field.value, &mut inf_data);
 
                 // 3.1. Gate Validation in 'routed_gates' fields
                 if block_name == "RouteInfo" && field.key == "routed_gates" {
                     validate_gates(&field.value, &mut diagnostics);
+                }
+
+                // 3.2. Enforce Float type on 'cost' field
+                if field.key == "cost"
+                    && field_type != Type::Unknown
+                    && !types_compatible(&field_type, &Type::Float)
+                {
+                    diagnostics.push(Diagnostic {
+                        range: field.value.range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        message: format!(
+                            "'cost' must return Float, got '{}'. \
+                             Hint: Comparisons return Bool — use arithmetic instead.",
+                            field_type
+                        ),
+                        ..Default::default()
+                    });
                 }
             }
         }
@@ -147,8 +182,9 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
                     range: expr.range,
                     severity: Some(DiagnosticSeverity::WARNING),
                     message: format!(
-                        "'{}' is not a recognized standard gate. Expected one of: {:?}",
-                        name, valid_gates
+                        "'{}' is not a recognized standard gate. Expected one of: {}",
+                        name,
+                        valid_gates.join(", ")
                     ),
                     ..Default::default()
                 });
@@ -670,8 +706,9 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     range: index.range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     message: format!(
-                        "Index type mismatch. Expected '{:?}' but got '{:?}'.",
-                        expected_idx_type, idx_type
+                        "Index type mismatch. Expected '{}' but got '{}'.",
+                        type_display(&expected_idx_type),
+                        type_display(&idx_type)
                     ),
                     ..Default::default()
                 });
@@ -716,9 +753,8 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-
                             message: format!(
-                                "Cannot use operation {:?} on types {} and {}.",
+                                "Cannot use operation '{}' on types {} and {}.",
                                 op, left_type, right_type
                             ),
                             ..Default::default()
@@ -735,9 +771,8 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-
                             message: format!(
-                                "Cannot use operation {:?} on types {} and {}.",
+                                "Cannot use operation '{}' on types {} and {}.",
                                 op, left_type, right_type
                             ),
                             ..Default::default()
@@ -764,12 +799,11 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 }
 
                 BinaryOperator::And | BinaryOperator::Or => match (&left_type, &right_type) {
-                    (Type::Bool, Type::Bool) => Type::Bool,
+                    (Type::Unknown | Type::Bool, Type::Bool | Type::Unknown) => Type::Bool,
                     (_, _) => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
                             severity: Some(DiagnosticSeverity::ERROR),
-
                             message: format!(
                                 "Cannot use logical operations on types {} and {}.",
                                 left_type, right_type
@@ -789,6 +823,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             match op {
                 UnaryOperator::Not => match operand_type {
                     Type::Bool => Type::Bool,
+                    Type::Unknown => Type::Unknown,
                     _ => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -802,6 +837,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 UnaryOperator::Neg => match operand_type {
                     Type::Int => Type::Int,
                     Type::Float => Type::Float,
+                    Type::Unknown => Type::Unknown,
                     _ => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -815,6 +851,35 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             }
         }
         ExprKind::TensorProduct { .. } => Type::Unknown, // TODO what to do here?
+        ExprKind::Match { scrutinee, arms } => {
+            let _scrutinee_type = infer_expr_type(scrutinee, inference_data);
+
+            if arms.is_empty() {
+                return Type::Unknown;
+            }
+
+            let first_type = infer_expr_type(&arms[0].body, inference_data);
+            for arm in &arms[1..] {
+                let arm_type = infer_expr_type(&arm.body, inference_data);
+                if arm_type != Type::Unknown
+                    && first_type != Type::Unknown
+                    && !types_compatible(&arm_type, &first_type)
+                {
+                    inference_data.diagnostics.push(Diagnostic {
+                        range: arm.body.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        message: format!(
+                            "Match arm type '{}' is inconsistent with first arm type '{}'.",
+                            type_display(&arm_type),
+                            type_display(&first_type)
+                        ),
+                        ..Default::default()
+                    });
+                }
+            }
+
+            first_type
+        }
         ExprKind::Projection { index, tuple } => {
             // first, get type of the tuple
             let tuple_type = infer_expr_type(tuple, inference_data);
@@ -833,6 +898,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         Type::Unknown
                     }
                 },
+                Type::Unknown => Type::Unknown,
                 _ => {
                     inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,
@@ -849,6 +915,12 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
     inference_data.type_map.overlay(expr.id, &found_type);
 
     found_type
+}
+
+/// Formats a Type for display in user-facing diagnostic messages.
+/// Delegates to the Display impl on Type (defined in symbols.rs).
+pub fn type_display(ty: &Type) -> String {
+    format!("{}", ty)
 }
 
 /// Comparisons are things like == or !=
@@ -882,7 +954,7 @@ fn types_math(t1: &Type, t2: &Type) -> Option<Type> {
 
         // if first type is one of the other math-y types, then we can do a math
         // op if the other type is an int, or just if the two types are equal
-        Type::Float | Type::Bool | Type::Location | Type::Qubit => {
+        Type::Float | Type::Location | Type::Qubit => {
             if matches!(t2, Type::Int) || t1 == t2 {
                 Some(t1.clone())
             } else {
@@ -932,6 +1004,10 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
         // Qubit/Int leniency - Qubit wraps usize, so Int literals are valid shorthand
         (Type::Qubit, Type::Int) => true,
         (Type::Int, Type::Qubit) => true,
+
+        // Location/Int leniency - Location wraps usize, valid as Vec index
+        (Type::Location, Type::Int) => true,
+        (Type::Int, Type::Location) => true,
 
         // Numeric leniency
         (Type::Int, Type::Float) => true,

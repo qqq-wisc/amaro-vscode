@@ -66,6 +66,7 @@ pub fn largest_expr_containing(file: &AmaroFile, position: Position) -> Result<&
                 .filter_map(|item| match item {
                     crate::ast::BlockItem::Field(field) => Some(field),
                     crate::ast::BlockItem::StructDef(_) => None,
+                    crate::ast::BlockItem::ReturnKeyword { .. } => None,
                 })
                 .find(|field| {
                     field.value_range.start <= position && field.value_range.end > position

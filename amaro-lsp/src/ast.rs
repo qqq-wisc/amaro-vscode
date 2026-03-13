@@ -41,6 +41,15 @@ pub enum BlockContent {
 pub enum BlockItem {
     Field(Field),
     StructDef(StructDef),
+    /// A field whose value started with the `return` keyword.
+    /// Stored so `check_semantics` can emit a targeted warning and treat
+    /// the field as present (avoiding a spurious "missing required field" error).
+    ReturnKeyword {
+        /// The range of the `return` token itself.
+        range: Range,
+        /// The field key (e.g. `"apply"`).
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +170,12 @@ pub enum ExprKind {
     Some(Box<Expr>),
     None,
 
+    // Match expression
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
+
     // Amaro-specific operators
     TensorProduct {
         left: Box<Expr>,
@@ -196,6 +211,7 @@ impl std::fmt::Display for ExprKind {
             ExprKind::None => f.write_str("None"),
             ExprKind::TensorProduct { .. } => f.write_str("Tensor"),
             ExprKind::Projection { .. } => f.write_str("Projection"),
+            ExprKind::Match { .. } => f.write_str("Match"),
         }
     }
 }
@@ -228,10 +244,51 @@ pub enum BinaryOperator {
     Tensor, // ⊗
 }
 
+impl std::fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            BinaryOperator::Add => "+",
+            BinaryOperator::Sub => "-",
+            BinaryOperator::Mul => "*",
+            BinaryOperator::Div => "/",
+            BinaryOperator::Mod => "%",
+            BinaryOperator::Eq => "==",
+            BinaryOperator::Ne => "!=",
+            BinaryOperator::Lt => "<",
+            BinaryOperator::Le => "<=",
+            BinaryOperator::Gt => ">",
+            BinaryOperator::Ge => ">=",
+            BinaryOperator::And => "&&",
+            BinaryOperator::Or => "||",
+            BinaryOperator::Range => "..",
+            BinaryOperator::Tensor => "⊗",
+        };
+        f.write_str(s)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOperator {
     Not,
     Neg,
+}
+
+/// A single arm of a `match` expression: `| Pattern -> body`.
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Expr,
+}
+
+/// A pattern in a `match` arm.
+#[derive(Debug, Clone)]
+pub enum MatchPattern {
+    /// A named pattern, e.g. `CX` or `Pauli`.
+    Identifier(String),
+    /// The wildcard `_` — matches anything.
+    Wildcard,
+    /// A tuple pattern, e.g. `(A, B)`.
+    Tuple(Vec<MatchPattern>),
 }
 
 impl Expr {

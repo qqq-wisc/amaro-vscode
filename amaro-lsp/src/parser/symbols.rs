@@ -125,7 +125,7 @@ impl std::fmt::Display for Type {
                     }
                 }
                 f.write_char(')')
-            } // make this pleasant..
+            }
             Type::Option(inner) => f
                 .write_str("Option<")
                 .and(inner.fmt(f))
@@ -234,6 +234,7 @@ impl UserDefTable {
                 .filter_map(|elt| match elt {
                     crate::ast::BlockItem::Field(_) => None,
                     crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
+                    crate::ast::BlockItem::ReturnKeyword { .. } => None,
                 })
                 .for_each(|struct_def| {
                     let fields = struct_def

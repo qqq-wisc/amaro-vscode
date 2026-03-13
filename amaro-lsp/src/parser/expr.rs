@@ -4,7 +4,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while},
     character::complete::{char, digit1},
-    combinator::{map, opt, peek, recognize, value},
+    combinator::{map, opt, peek, recognize, value, verify},
     multi::{many0, separated_list0},
     sequence::{pair, terminated, tuple},
 };
@@ -50,6 +50,11 @@ impl ParseContext {
     }
 }
 
+/// Parses a keyword by its exact name with word-boundary checking.
+fn parse_keyword<'a>(kw: &'static str) -> impl FnMut(&'a str) -> IResult<&'a str, &'a str> {
+    move |input: &'a str| verify(parse_identifier, move |s: &str| s == kw)(input)
+}
+
 pub fn parse_expr<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, Expr> {
     let (input, _) = whitespace_handler(input)?;
 
@@ -78,7 +83,7 @@ fn parse_let_expr<'a>(
 
     // 1. Consume whitespace before 'let'
     let (input, _) = whitespace_handler(input)?;
-    let (input, is_let) = opt(tag("let"))(input)?;
+    let (input, is_let) = opt(parse_keyword("let"))(input)?;
 
     if is_let.is_some() {
         // 2. Whitespace after 'let'
@@ -94,7 +99,7 @@ fn parse_let_expr<'a>(
 
         // 4. Handle 'in' with whitespace around it
         let (input, _) = whitespace_handler(input)?;
-        let (input, _) = tag("in")(input)?;
+        let (input, _) = parse_keyword("in")(input)?;
         let (input, _) = whitespace_handler(input)?;
 
         let (input, body) = parse_expr_with_context(original_input, input, ctx)?;
@@ -113,7 +118,13 @@ fn parse_let_expr<'a>(
             ),
         ))
     } else {
-        parse_if_expr(original_input, input, ctx)
+        // Check for `match` expression before delegating to if/lambda/binary
+        let (_, is_match) = opt(peek(ws(parse_keyword("match"))))(input)?;
+        if is_match.is_some() {
+            parse_match_expr(original_input, input, ctx)
+        } else {
+            parse_if_expr(original_input, input, ctx)
+        }
     }
 }
 
@@ -126,7 +137,7 @@ fn parse_if_expr<'a>(
 
     // 1. Consume whitespace before 'if'
     let (input, _) = whitespace_handler(input)?;
-    let (input, is_if) = opt(tag("if"))(input)?;
+    let (input, is_if) = opt(parse_keyword("if"))(input)?;
 
     if is_if.is_some() {
         // 2. Whitespace after 'if'
@@ -135,14 +146,14 @@ fn parse_if_expr<'a>(
 
         // 3. Handle 'then' with whitespace around it
         let (input, _) = whitespace_handler(input)?;
-        let (input, _) = tag("then")(input)?;
+        let (input, _) = parse_keyword("then")(input)?;
         let (input, _) = whitespace_handler(input)?;
 
         let (input, then_branch) = parse_if_expr(original_input, input, ctx)?;
 
         // 4. Handle 'else' with whitespace around it
         let (input, _) = whitespace_handler(input)?;
-        let (input, _) = tag("else")(input)?;
+        let (input, _) = parse_keyword("else")(input)?;
         let (input, _) = whitespace_handler(input)?;
 
         let (input, else_branch) = parse_if_expr(original_input, input, ctx)?;
@@ -385,7 +396,7 @@ fn parse_unary_expr<'a>(
     match op_parse {
         Ok((rest, op)) => {
             let (rest, operand) = parse_unary_expr(original_input, rest, ctx)?;
-            let end = operand.range.end.character as usize;
+            let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
             Ok((
                 rest,
                 Expr::new(
@@ -483,7 +494,13 @@ fn parse_postfix_expr<'a>(
         // Function call
         if let Ok((rest, _)) = ws(char('('))(current_input) {
             let (rest, args) = separated_list0(ws(char(',')), |i| {
-                parse_expr_with_context(original_input, i, ctx)
+                //parse_expr_with_context(original_input, i, ctx)
+                let (i, _) = whitespace_handler(i)?;
+                let arg_start = i.as_ptr() as usize - original_input.as_ptr() as usize;
+                let (i, mut expr) = parse_expr_with_context(original_input, i, ctx)?;
+                let arg_end = i.as_ptr() as usize - original_input.as_ptr() as usize;
+                expr.range = calc_range(original_input, arg_start, arg_end - arg_start);
+                Ok((i, expr))
             })(rest)?;
             let (rest, _) = ws(char(')'))(rest)?;
 
@@ -622,6 +639,63 @@ fn parse_primary_expr<'a>(
         rest_after_id,
         Expr::identifier(id_str.to_string(), calc_range(original_input, start, len)),
     ))
+}
+
+fn parse_match_expr<'a>(
+    original_input: &'a str,
+    input: &'a str,
+    ctx: &mut ParseContext,
+) -> IResult<&'a str, Expr> {
+    let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
+
+    // Consume `match` keyword
+    let (input, _) = ws(parse_keyword("match"))(input)?;
+
+    // Parse scrutinee — any expression up to `with`
+    let (input, scrutinee) = parse_expr_with_context(original_input, input, ctx)?;
+
+    // Consume `with`
+    let (input, _) = ws(tag("with"))(input)?;
+
+    // Parse arms: `| pattern -> body`
+    let mut arms = Vec::new();
+    let mut current = input;
+    while let Ok((rest, _)) = ws(char('|'))(current) {
+        let (rest, pattern) = parse_match_pattern(rest)?;
+        let (rest, _) = ws(tag("->"))(rest)?;
+        let (rest, body) = parse_expr_with_context(original_input, rest, ctx)?;
+        arms.push(MatchArm { pattern, body });
+        current = rest;
+    }
+
+    if arms.is_empty() {
+        return Err(nom::Err::Error(Error::new(
+            current,
+            nom::error::ErrorKind::Many1,
+        )));
+    }
+
+    let end = current.as_ptr() as usize - original_input.as_ptr() as usize;
+    Ok((
+        current,
+        Expr::new(
+            ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            calc_range(original_input, start, end - start),
+        ),
+    ))
+}
+
+fn parse_match_pattern(input: &str) -> IResult<&str, MatchPattern> {
+    let (input, _) = whitespace_handler(input)?;
+    let (rest, name) = ws(parse_identifier)(input)?;
+    if name == "_" {
+        Ok((rest, MatchPattern::Wildcard))
+    } else {
+        Ok((rest, MatchPattern::Identifier(name.to_string())))
+    }
 }
 
 fn parse_number<'a>(original_input: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, Expr> {

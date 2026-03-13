@@ -97,6 +97,8 @@ pub fn is_keyword(s: &str) -> bool {
             | "None"
             | "where"
             | "return"
+            | "match"
+            | "with"
     )
 }
 
@@ -248,6 +250,37 @@ fn extract_block_items(original_input: &str, body_text: &str) -> Vec<BlockItem> 
     let mut current_input = body_text;
 
     while !current_input.trim().is_empty() {
+        // Pre-check: detect `key = return ...` before the parse attempt.
+        // `parse_field` would silently fail on `return` (it's a keyword), causing
+        // a spurious "missing required field" error downstream.
+        // Instead, capture it as a ReturnKeyword item so semantics can warn clearly.
+        let trimmed = current_input.trim_start();
+        if let Some((key_part, after_eq)) = trimmed.split_once('=') {
+            let key = key_part.trim();
+            let val = after_eq.trim_start();
+            let is_simple_identifier = !key.is_empty()
+                && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && !key.contains(' ');
+            let starts_with_return = val == "return"
+                || val.starts_with("return ")
+                || val.starts_with("return\n")
+                || val.starts_with("return\r");
+            if is_simple_identifier && starts_with_return {
+                let return_offset = val.as_ptr() as usize - original_input.as_ptr() as usize;
+                let return_range = calc_range(original_input, return_offset, "return".len());
+                items.push(BlockItem::ReturnKeyword {
+                    range: return_range,
+                    key: key.to_string(),
+                });
+                if let Some(pos) = current_input.find('\n') {
+                    current_input = &current_input[pos + 1..];
+                } else {
+                    break;
+                }
+                continue;
+            }
+        }
+
         match parse_block_item(original_input, current_input) {
             Ok((rest, Some(item))) => {
                 items.push(item);

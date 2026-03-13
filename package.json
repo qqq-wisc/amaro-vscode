@@ -71,7 +71,10 @@
     "test": "vscode-test",
     "build-mac": "mkdir -p bin && cd amaro-lsp && cargo build --release && cp target/release/amaro-lsp ../bin/amaro-lsp-mac",
     "build-win": "mkdir bin || cd amaro-lsp && cargo build --release && copy .\\target\\release\\amaro-lsp.exe ..\\bin\\amaro-lsp-win.exe",
-    "build-linux": "mkdir -p bin && cd amaro-lsp && cargo build --release && cp target/release/amaro-lsp ../bin/amaro-lsp-linux"
+    "build-linux": "mkdir -p bin && cd amaro-lsp && cargo build --release && cp target/release/amaro-lsp ../bin/amaro-lsp-linux",
+    "postinstall": "npm run build-lsp",
+    "build-lsp": "cd amaro-lsp && cargo build --release",
+    "build-binaries": "bash scripts/build-binaries.sh"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

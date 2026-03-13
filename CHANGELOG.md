@@ -4,19 +4,35 @@ All notable changes to the "amaro-vscode" extension will be documented in this f
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+<<<<<<< HEAD
 ## [1.0.3] - 2026-02-27
+=======
+## [1.0.3] - 2026-03-04
+>>>>>>> main
 
 ### Added
 - **Autocomplete:** Typing a '.' after some types will provide autocomplete options. For instance, typing `Arch.` shows the fields and functions on `Arch`.
 - **Expression type shown on hover:** Hovering over most expressions indicates the type of the expression.
-- **Field type shown on hover:** Hovering over a field within a block indicates the type of the field for most basic fields. For instance, hovering over `cost` in the `TransitionInfo` block will indicate that it expects a function `(Transition) -> Float`
+- **Field type shown on hover:** Hovering over a field within a block indicates the type of the field for most basic fields. For instance, hovering over `cost` in the `TransitionInfo` block will indicate that it expects a function `(Transition) -> Float`.
+- **`match` Expression Support:** The parser now handles `match <expr> with | Pattern -> body` syntax. Type inference checks that all arms return consistent types and warns on mismatches. `match` and `with` are correctly reserved as keywords.
+- **Trap Topology Fields:** `ArchT` now recognizes `trap_positions`, `trap_vertices`, `trap_edges`, `locations`, and `edges_between` as valid fields, enabling trapped-ion architecture files to validate without false errors.
+- **Missing Built-in Functions:** Added `consistent`, `to_2d`, `combinations`, `max`, `min`, `abs`, and `dist` to the global symbol table. These were previously flagged as "Undefined variable" errors.
+- **`Step` Context Variable:** Registered `Step` (capitalized) as an alias for the state context variable, restoring compatibility with older-format `.qmrl` files.
+
+### Fixed
+- **Invalid Expression Ranges:** Ranges now accurately reflect start and end bounds of all expressions.
+- **BinaryOp Type Inference:** Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) now correctly return `Bool`. Arithmetic operators return the operand type (`Int` or `Float`). Previously all binary operations returned `Unknown`, allowing invalid conditions like `cost = (x > y)` to silently pass.
+- **UnaryOp Type Inference:** `!expr` now returns `Bool` (and errors if the operand is non-Bool). `-expr` returns `Int` or `Float` based on the operand. Both previously returned `Unknown`.
+- **Projection Type Inference:** Tuple projection (e.g., `edge.(0)`) now returns the type of the indexed element instead of `Unknown`.
+- **UnaryOp Range Overflow Panic:** Fixed a crash where `!x` and `-x` expressions caused a `usize` underflow panic due to a column number being incorrectly used as a byte offset when computing the diagnostic range.
+- **Struct Field Pre-pass:** The semantic checker now performs a pre-pass to register user-defined struct fields (e.g., `GateRealization{path : Vec<Location>}`) before type-checking expressions. Field accesses on user-defined structs now return the correct declared type instead of `Unknown`.
+- **`cost` Field Type Enforcement:** `TransitionInfo.cost` and `StateInfo.cost` now reject non-Float values. `Bool` and `String` values produce an error; `Int` is accepted with leniency.
+- **`return` Keyword Warning:** When a field value starts with `return` (invalid in Amaro's functional style), the extension now emits a targeted warning explaining the issue, rather than silently dropping the field and producing a misleading "missing required field" error downstream.
+- **Human-Readable Diagnostic Messages:** Error messages that previously showed Rust debug format (e.g., `Vec(Box(Location))`) now display proper type names (e.g., `Vec<Location>`).
 
 ### Changed
 - **Expression inference:** The `infer_expr_type` method has changed signature. It additionally takes in a mutable `type_map` field, which stores mappings from expression IDs to their `Type`s as expression types are inferred. As well as this, a `user_def_table` is passed, which holds the fields for user-defined structs such as `Transition`.
 - **Type enum:** In conjunction with the above, the `Type` enum has been extended to allow for referring to user-defined types.
-
-### Fixed
-- Invalid ranges applied to some expressions. Now, ranges accurately reflect start and end bounds of all expressions.
 
 ## [1.0.2] - 2026-02-18
 

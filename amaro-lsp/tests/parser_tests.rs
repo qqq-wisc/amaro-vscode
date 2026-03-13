@@ -466,6 +466,7 @@ TransitionInfo:
                 BlockItem::StructDef(struct_def) => {
                     ids.insert(struct_def.id);
                 }
+                BlockItem::ReturnKeyword { .. } => {}
             }
         }
     }
@@ -1067,4 +1068,45 @@ fn test_infer_bin_op() {
     let file = parse_file(input).unwrap();
     assert_eq!(file.blocks.len(), 1);
     assert_eq!(file.blocks[0].kind, "GateRealization");
+}
+
+#[test]
+fn test_match_expression_basic() {
+    let input = r#"RouteInfo:
+    value = match gate with
+        | CX -> 1
+        | T -> 2"#;
+
+    let file = parse_file(input).unwrap();
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        if let ExprKind::Match { scrutinee, arms } = &field.value.kind {
+            assert!(matches!(scrutinee.kind, ExprKind::Identifier(_)));
+            assert_eq!(arms.len(), 2);
+            assert!(matches!(arms[0].pattern, MatchPattern::Identifier(_)));
+            assert!(matches!(arms[1].pattern, MatchPattern::Identifier(_)));
+        } else {
+            panic!("Expected Match expression, got {:?}", field.value.kind);
+        }
+    }
+}
+
+#[test]
+fn test_match_expression_with_wildcard() {
+    let input = r#"RouteInfo:
+    value = match gate with
+        | CX -> 1
+        | _ -> 0"#;
+
+    let file = parse_file(input).unwrap();
+    let BlockContent::Fields(items) = &file.blocks[0].content;
+    if let Some(BlockItem::Field(field)) = items.first() {
+        if let ExprKind::Match { arms, .. } = &field.value.kind {
+            assert_eq!(arms.len(), 2);
+            assert!(matches!(arms[0].pattern, MatchPattern::Identifier(_)));
+            assert!(matches!(arms[1].pattern, MatchPattern::Wildcard));
+        } else {
+            panic!("Expected Match expression");
+        }
+    }
 }
