@@ -484,15 +484,17 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             .collect::<Result<Vec<_>, _>>();
 
                         if let Err(t) = outcome {
-                            inference_data.diagnostics.push(Diagnostic {
-                                range: expr.range,
-                                severity: Some(DiagnosticSeverity::ERROR),
-                                message: format!(
-                                    "Issue when inferring generics of function call: {}",
-                                    t
-                                ),
-                                ..Default::default()
-                            });
+                            // don't output error for generic failures
+
+                            // inference_data.diagnostics.push(Diagnostic {
+                            //     range: expr.range,
+                            //     severity: Some(DiagnosticSeverity::ERROR),
+                            //     message: format!(
+                            //         "Issue when inferring generics of function call: {}",
+                            //         t
+                            //     ),
+                            //     ..Default::default()
+                            // });
                             inference_data.type_map.overlay(expr.id, &Type::Unknown);
                             return Type::Unknown;
                         }

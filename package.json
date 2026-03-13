@@ -70,7 +70,7 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "build-mac": "mkdir -p bin && cd amaro-lsp && cargo build --release && cp target/release/amaro-lsp ../bin/amaro-lsp-mac",
-    "build-win": "mkdir bin 2>null || cd amaro-lsp && cargo build --release && copy .\\target\\release\\amaro-lsp.exe ..\\bin\\amaro-lsp-win.exe",
+    "build-win": "mkdir bin || cd amaro-lsp && cargo build --release && copy .\\target\\release\\amaro-lsp.exe ..\\bin\\amaro-lsp-win.exe",
     "build-linux": "mkdir -p bin && cd amaro-lsp && cargo build --release && cp target/release/amaro-lsp ../bin/amaro-lsp-linux"
   },
   "devDependencies": {

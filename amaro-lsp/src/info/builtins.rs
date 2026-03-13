@@ -444,7 +444,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 parent_type: Some(Type::Gate),
                 identifier: "qubits".to_string(),
                 typ: Type::Vec(Box::new(Type::Qubit)),
-                details: "[TODO info about .qubits goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::Gate),
@@ -453,13 +453,13 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![],
                     return_type: Box::new(Type::Gate),
                 },
-                details: "[TODO info about .gate_type goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::Gate),
                 identifier: "implementation".to_string(),
                 typ: Type::Unknown,
-                details: "[TODO info about .implementation goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::Gate),
@@ -468,7 +468,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
                 },
-                details: "[TODO info about .x_indices goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::Gate),
@@ -477,7 +477,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
                 },
-                details: "[TODO info about .y_indices goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::Gate),
@@ -486,7 +486,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Qubit))),
                 },
-                details: "[TODO info about .z_indices goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
         ],
     ),
@@ -528,7 +528,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 parent_type: Some(Type::ArchT),
                 identifier: "succ_rates".to_string(),
                 typ: Type::Vec(Box::new(Type::Vec(Box::new(Type::Float)))),
-                details: "[TODO info about Arch.succ_rates goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::ArchT),
@@ -537,7 +537,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
                     return_type: Box::new(Type::Bool),
                 },
-                details: "[TODO info about Arch.contains_edge goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::ArchT),
@@ -546,7 +546,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Location))),
                 },
-                details: "[TODO info about Arch.magic_state_qubits goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::ArchT),
@@ -555,7 +555,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Location))),
                 },
-                details: "[TODO info about Arch.alg_qubits goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
         ],
     ),
@@ -570,7 +570,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![],
                     return_type: Box::new(Type::QubitMap),
                 },
-                details: "[TODO info about State.map goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::StateT),
@@ -579,14 +579,14 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                     params: vec![],
                     return_type: Box::new(Type::Vec(Box::new(Type::Gate))),
                 },
-                details: "[TODO info about State.gates goes here]".to_string(),
+                details: "".to_string(), // TODO details
             },
             BuiltIn {
                 parent_type: Some(Type::StateT),
                 identifier: "implemented_gates".to_string(),
                 typ: Type::Function { params: vec![],
-                    return_type: Box::new(Type::Vec(Box::new(Type::Unknown))) }, // TODO what is the type of this?
-                details: "[TODO info about State.implemented_gates goes here]".to_string(),
+                    return_type: Box::new(Type::Vec(Box::new(Type::Gate))) }, // TODO what is the type of this?
+                details: "".to_string(), // TODO details
             },
         ],
     ),
@@ -1122,7 +1122,7 @@ mod tests {
                     parent_type: Some(Type::ArchT),
                     identifier: "succ_rates".to_string(),
                     typ: Type::Vec(Box::new(Type::Vec(Box::new(Type::Float)))),
-                    details: "[TODO info about Arch.succ_rates goes here]".to_string(),
+                    details: "".to_string(), // TODO details
                 },
                 BuiltIn {
                     parent_type: Some(Type::ArchT),
@@ -1131,7 +1131,7 @@ mod tests {
                         params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
                         return_type: Box::new(Type::Bool),
                     },
-                    details: "[TODO info about Arch.contains_edge goes here]".to_string(),
+                    details: "".to_string(), // TODO details
                 },
                 BuiltIn {
                     parent_type: Some(Type::ArchT),
@@ -1140,7 +1140,7 @@ mod tests {
                         params: vec![],
                         return_type: Box::new(Type::Vec(Box::new(Type::Location))),
                     },
-                    details: "[TODO info about Arch.magic_state_qubits goes here]".to_string(),
+                    details: "".to_string(), // TODO details
                 },
                 BuiltIn {
                     parent_type: Some(Type::ArchT),
@@ -1149,7 +1149,7 @@ mod tests {
                         params: vec![],
                         return_type: Box::new(Type::Vec(Box::new(Type::Location))),
                     },
-                    details: "[TODO info about Arch.alg_qubits goes here]".to_string(),
+                    details: "".to_string(), // TODO details
                 },
             ];
 
