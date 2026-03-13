@@ -130,7 +130,11 @@ fn format_expr_preview(expr: &Expr) -> String {
         ExprKind::None => "None".to_string(),
 
         ExprKind::Match { scrutinee, arms } => {
-            format!("match {} with ({} arms)", format_expr_preview(scrutinee), arms.len())
+            format!(
+                "match {} with ({} arms)",
+                format_expr_preview(scrutinee),
+                arms.len()
+            )
         }
     }
 }

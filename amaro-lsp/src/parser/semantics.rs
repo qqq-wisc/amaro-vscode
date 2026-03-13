@@ -519,7 +519,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             })
                             .collect::<Result<Vec<_>, _>>();
 
-                        if let Err(t) = outcome {
+                        if outcome.is_err() {
                             // don't output error for generic failures
 
                             // inference_data.diagnostics.push(Diagnostic {
@@ -1370,8 +1370,8 @@ pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
             // return type of body is the type of whole let expr
             retype(body, new_type.clone(), inference_data);
         }
-        ExprKind::BinaryOp { .. } => todo!(), // a lot to do here hmm
-        ExprKind::UnaryOp { .. } => todo!(),  // a lot to do here hmm
+        ExprKind::BinaryOp { .. } => todo!(),
+        ExprKind::UnaryOp { .. } => todo!(),
         ExprKind::Some(inner) => {
             // can retype inner too
             if let Type::Option(ref inner_type) = new_type {
@@ -1386,6 +1386,11 @@ pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
         }
         ExprKind::Projection { .. } => {
             // very non-trivial to retype descent, so this should be OK
+        }
+        ExprKind::Match { arms, .. } => {
+            // the type of the match expr is the type of all the arms
+            arms.iter()
+                .for_each(|elt| retype(&elt.body, new_type.clone(), inference_data));
         }
     }
 }

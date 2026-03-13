@@ -797,7 +797,6 @@ TransitionInfo:
     );
 }
 
-
 #[test]
 fn test_comparison_used_as_if_condition_no_error() {
     let input = r#"
@@ -810,7 +809,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -834,7 +833,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let has_error = diags
         .iter()
         .any(|d| d.message.to_lowercase().contains("bool"));
@@ -859,7 +858,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let has_type_error = diags
         .iter()
         .any(|d| d.severity == Some(DiagnosticSeverity::ERROR));
@@ -883,7 +882,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -908,7 +907,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let has_field_warning = diags.iter().any(|d| {
         d.message.to_lowercase().contains("nonexistent")
             || d.message.to_lowercase().contains("no field")
@@ -931,10 +930,10 @@ TransitionInfo:
     cost = true
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
-    let has_cost_error = diags.iter().any(|d| {
-        d.message.contains("cost") && d.message.to_lowercase().contains("float")
-    });
+    let (diags, _, _) = check_semantics(&file);
+    let has_cost_error = diags
+        .iter()
+        .any(|d| d.message.contains("cost") && d.message.to_lowercase().contains("float"));
     assert!(
         has_cost_error,
         "Bool literal as cost should be rejected. Got: {:?}",
@@ -954,7 +953,7 @@ TransitionInfo:
     cost = 1.5
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let cost_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("cost"))
@@ -979,7 +978,7 @@ TransitionInfo:
     cost = 0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let cost_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("cost"))
@@ -1003,10 +1002,10 @@ TransitionInfo:
     cost = 'oops'
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
-    let has_cost_error = diags.iter().any(|d| {
-        d.message.contains("cost") && d.message.to_lowercase().contains("float")
-    });
+    let (diags, _, _) = check_semantics(&file);
+    let has_cost_error = diags
+        .iter()
+        .any(|d| d.message.contains("cost") && d.message.to_lowercase().contains("float"));
     assert!(
         has_cost_error,
         "String as cost should be rejected. Got: {:?}",
@@ -1028,7 +1027,7 @@ TransitionInfo:
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let has_debug_artifact = diags.iter().any(|d| d.message.contains("Box("));
     assert!(
         !has_debug_artifact,
@@ -1050,7 +1049,7 @@ TransitionInfo:
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let has_debug_artifact = diags.iter().any(|d| d.message.contains("Box("));
     assert!(
         !has_debug_artifact,
@@ -1072,7 +1071,7 @@ TransitionInfo:
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1097,7 +1096,7 @@ TransitionInfo:
     cost = -1
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1127,7 +1126,7 @@ GateRealization:
     data = Transition.edge.(0)
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Transition'"))
@@ -1152,7 +1151,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef_arch: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Arch'"))
@@ -1177,7 +1176,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef_arch: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Arch'"))
@@ -1201,7 +1200,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined") || d.message.contains("non-function"))
@@ -1228,7 +1227,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined") || d.message.contains("non-function"))
@@ -1254,11 +1253,11 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
-    let missing_apply = diags.iter().any(|d| {
-        d.message.contains("missing required field") && d.message.contains("apply")
-    });
+    let missing_apply = diags
+        .iter()
+        .any(|d| d.message.contains("missing required field") && d.message.contains("apply"));
     let return_warning = diags
         .iter()
         .any(|d| d.message.to_lowercase().contains("return"));
@@ -1288,7 +1287,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
 
     let return_diag = diags
         .iter()
@@ -1319,7 +1318,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1345,7 +1344,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef_step: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable") && d.message.contains("Step"))
@@ -1370,7 +1369,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     // No errors should occur in a valid file — 'step' being Int is an internal guarantee
     let errors: Vec<_> = diags
         .iter()
@@ -1395,7 +1394,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1420,7 +1419,7 @@ TransitionInfo:
     cost = max(min(1, 2), abs(0))
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1445,7 +1444,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'consistent'"))
@@ -1470,7 +1469,7 @@ TransitionInfo:
     cost = max(0, abs(0))
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1497,7 +1496,7 @@ TransitionInfo:
     get_transitions = []
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1524,7 +1523,7 @@ TransitionInfo:
     get_transitions = []
 "#;
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let keyword_errors: Vec<_> = diags
         .iter()
         .filter(|d| {
@@ -1554,10 +1553,14 @@ TransitionInfo:
     // If is_keyword works correctly, fields named 'match' or 'with' would be rejected.
     // Just verify the valid file above parses and validates cleanly.
     let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let (diags, _, _) = check_semantics(&file);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
         .collect();
-    assert!(errors.is_empty(), "Clean file should have no errors. Got: {:?}", errors);
+    assert!(
+        errors.is_empty(),
+        "Clean file should have no errors. Got: {:?}",
+        errors
+    );
 }
