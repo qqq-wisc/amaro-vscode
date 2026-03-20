@@ -19,6 +19,89 @@ pub enum Owner<'a, T> {
 /// Global, persistent location where the built-ins are kept. They do not change
 /// between different files.
 static GLOBAL: OnceLock<Vec<(Option<Type>, Vec<BuiltIn>)>> = OnceLock::new();
+static FIELDS: OnceLock<Vec<FieldInfo>> = OnceLock::new();
+
+/// Struct for recognizing the types of fields, such as that "cost" allows
+/// for using "Transition" and requires a value of "Float"
+#[derive(Debug)]
+pub struct FieldInfo {
+    /// The string name of the block that this field should reside in.
+    /// For instance, "TransitionInfo".
+    pub block_name: String,
+    /// The string name of the field. For instance, "cost".
+    pub field_name: String,
+    /// Human-readable information about the field.
+    pub info: String,
+    /// The type of the field. ALWAYS a function.
+    pub typ: Type
+}
+
+impl FieldInfo {
+    pub fn show_details(&self) -> String {
+        format!("## {}\n *In block {}*\n\n{}\n\n{}", self.field_name, self.block_name, self.typ,self.info)
+    }
+}
+
+fn init_fields() -> Vec<FieldInfo> {
+    // order doesn't matter
+    vec![
+        FieldInfo { 
+            block_name: "TransitionInfo".to_string(), 
+            field_name: "cost".to_string(), 
+            info: "Cost of transitions".to_string(),
+            typ: Type::Function { params: vec![
+                    Type::UserDef("Transition".to_string())
+                ], return_type: Box::new(Type::Float)
+            }
+        },
+        FieldInfo { 
+            block_name: "RouteInfo".to_string(), 
+            field_name: "realize_gate".to_string(), 
+            info: "".to_string(), // TODO details
+            typ: Type::Function { params: vec![
+                    Type::ArchT,
+                    Type::StateT,
+                    Type::Gate
+                ], return_type: Box::new(Type::Option(Box::new(Type::UserDef(
+                "GateRealization".to_string(),
+            ))))
+            }
+        },
+        FieldInfo { 
+            block_name: "TransitionInfo".to_string(), 
+            field_name: "get_transitions".to_string(), 
+            info: "".to_string(), // TODO details
+            typ: Type::Function {
+                params: vec![Type::ArchT, Type::StateT],
+                return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))),
+            }
+        },
+        FieldInfo { 
+            block_name: "TransitionInfo".to_string(), 
+            field_name: "apply".to_string(),
+            info: "".to_string(), // TODO details
+            typ: Type::Function {
+                params: vec![Type::QubitMap, Type::UserDef("Transition".to_string())],
+                return_type: Box::new(Type::QubitMap),
+            }
+        },
+        FieldInfo { 
+            block_name: "RouteInfo".to_string(), 
+            field_name: "routed_gates".to_string(), 
+            info: "".to_string(), // TODO details
+            typ: Type::Function { params: vec![], 
+                return_type: Box::new(Type::Vec(Box::new(Type::Gate)))
+            }
+        },
+    ]
+}
+
+
+pub fn field_lookup(block_name: &str, field_name: &str) -> Option<&'static FieldInfo> {
+    let data = FIELDS.get_or_init(init_fields);
+
+    data.iter().find(|elt| elt.block_name == block_name && elt.field_name == field_name)
+}
 
 /// Given an identifier, gets the "raw" built-in associated with it.
 /// A "raw" built-in is something (usually a function) that is pre-defined
@@ -178,6 +261,12 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             identifier: "step".to_string(),
             typ: Type::Int,
             details: "Step type. Alias for Int".to_string()
+        },
+        BuiltIn {
+            parent_type: None,
+            identifier: "Step".to_string(),
+            typ: Type::StateT,
+            details: "Step state type.".to_string()
         },
         BuiltIn {
             parent_type: None,
@@ -350,10 +439,14 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             typ: Type::Function { params: vec![
                 Type::Generic(1), // init acc value
                 Type::Function { params: vec![
-                    Type::Generic(1), // acc
                     Type::Generic(0), // elt
-                ], return_type: Box::new(Type::Generic(1)) },
-                Type::Vec(Box::new(Type::Generic(0)))], return_type: Box::new(Type::Unknown) },
+                    Type::Generic(1), // acc
+                ], 
+                return_type: Box::new(Type::Generic(1)) // gives acc val
+             },
+                Type::Vec(Box::new(Type::Generic(0))) // collection of elts
+                ], return_type: Box::new(Type::Generic(1)) // final acc value
+            },
             details: "Given a Vec and an initial accumulation value, runs the accumulation function at each element to eventually return a single accumulated value.".to_string()
         },
 
@@ -433,6 +526,45 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             ],
                 return_type: Box::new(Type::Vec(Box::new(Type::Location))) },
             details: "".to_string() // TODO details
+        },
+
+        BuiltIn {
+            // TODO how to represent this...?
+            // This should work for floats and ints.
+            parent_type: None,
+            identifier: "max".to_string(),
+            typ: Type::Function { 
+                params: vec![
+                    Type::Int,
+                    Type::Int
+                ], 
+                return_type: Box::new(Type::Int) },
+            details: "Maximum value of two integers.".to_string()
+        },
+        BuiltIn {
+            // TODO how to represent this...?
+            // This should work for floats and ints.
+            parent_type: None,
+            identifier: "min".to_string(),
+            typ: Type::Function { 
+                params: vec![
+                    Type::Int,
+                    Type::Int
+                ], 
+                return_type: Box::new(Type::Int) },
+            details: "Minimum value of two integers.".to_string()
+        },
+        BuiltIn {
+            // TODO how to represent this...?
+            // This should work for floats and ints.
+            parent_type: None,
+            identifier: "abs".to_string(),
+            typ: Type::Function { 
+                params: vec![
+                    Type::Int
+                ], 
+                return_type: Box::new(Type::Int) },
+            details: "Absolute value of an integer.".to_string()
         },
     ]),
     (
@@ -978,10 +1110,13 @@ mod tests {
             typ: Type::Function { params: vec![
                 Type::Generic(1), // init acc value
                 Type::Function { params: vec![
-                    Type::Generic(1), // acc
                     Type::Generic(0), // elt
-                ], return_type: Box::new(Type::Generic(1)) },
-                Type::Vec(Box::new(Type::Generic(0)))], return_type: Box::new(Type::Unknown) },
+                    Type::Generic(1), // acc
+                ], return_type: Box::new(Type::Generic(1)) // new acc value
+            },
+                Type::Vec(Box::new(Type::Generic(0))) // input elements
+                ], return_type: Box::new(Type::Generic(1)) // return the acc
+            },
             details: "Given a Vec and an initial accumulation value, runs the accumulation function at each element to eventually return a single accumulated value.".to_string()
         },
 
@@ -1203,6 +1338,44 @@ mod tests {
                     return_type: Box::new(Type::Option(Box::new(Type::Int)))
                 }
             );
+        }
+    }
+
+    #[test]
+    fn test_field_lookup() {
+        if let Some(e) = field_lookup("nothing", "total garbage") {
+            panic!("Looking up total garbage gave output: {:?}", e);
+        }
+
+        if let Some(e) = field_lookup("TransitionInfo", "name garbage") {
+            panic!("Looking up valid block name but invalid field gave output: {:?}", e);
+        }
+
+        if let Some(e) = field_lookup("block garbage", "cost") {
+            panic!("Looking up valid field name but invalid block gave output: {:?}", e);
+        }
+
+        if let Some(e) = field_lookup("TransitionInfo", "realize_gate") {
+            panic!("Both block and field valid, but not together. Shouldn't have gotten: {:?}", e);
+        }
+
+        {
+            let lookup = field_lookup("TransitionInfo", "cost");
+            assert!(lookup.is_some());
+            let lookup = lookup.unwrap();
+            assert_eq!(lookup.typ, Type::Function { params: vec![Type::UserDef("Transition".to_string())], return_type: Box::new(Type::Float) });
+        }
+
+        {
+            let lookup = field_lookup("RouteInfo", "realize_gate");
+            assert!(lookup.is_some());
+            let lookup = lookup.unwrap();
+            assert_eq!(lookup.typ, Type::Function {
+                params: vec![Type::ArchT, Type::StateT, Type::Gate],
+                return_type: Box::new(Type::Option(Box::new(Type::UserDef(
+                    "GateRealization".to_string(),
+                )))),
+            });
         }
     }
 }

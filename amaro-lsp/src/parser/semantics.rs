@@ -1302,10 +1302,15 @@ pub fn contains_generic(typ: &Type) -> bool {
 /// format.
 /// Doesn't retype identifiers...
 pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
-    // eprintln!("Retyping {} from {} to {}", expr.kind, inference_data.type_map.get(&expr.id).unwrap(), new_type);
     // eprintln!("  Range: {:?}", expr.range);
-
+    if let Some(old_type) = inference_data.type_map.get(&expr.id) {
+        eprintln!("Retyping {} from {} to {}", expr.kind, old_type, new_type);
+    } else {
+        eprintln!(":::HEY! Retyping {} to {}, but no old type existed!", expr.kind, new_type);
+    }
+    
     inference_data.type_map.overlay(expr.id, &new_type);
+    
     // TODO: Can infer function return type this way, but don't have a good
     // method for doing this right now.
     match &expr.kind {

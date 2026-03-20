@@ -7,7 +7,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
 use crate::info::builtins;
-use crate::parser::symbols::{self, Type, UserDefTable};
+use crate::parser::symbols::{Type, UserDefTable};
 use crate::parser::{check_semantics, parse_file, semantics, utils};
 
 #[derive(Debug)]
@@ -573,13 +573,13 @@ impl LanguageServer for Backend {
         // first, check field names.
         let hovered_field = utils::field_name_containing(amaro_file, orig_pos);
 
-        if let Some((field_name, field_range)) = hovered_field {
+        if let Some((block_name, field_name, field_range)) = hovered_field {
             // need to lookup the name
-            if let Some(field_type) = symbols::field_lookup(&field_name) {
+            if let Some(field_info) = builtins::field_lookup(block_name.as_str(), field_name.as_str()) {
                 return Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::PlainText,
-                        value: format!("{}", field_type),
+                        kind: MarkupKind::Markdown,
+                        value: field_info.show_details(),
                     }),
                     range: Some(field_range),
                 }));

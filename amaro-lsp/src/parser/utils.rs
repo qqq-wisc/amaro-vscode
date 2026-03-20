@@ -90,25 +90,28 @@ pub fn smallest_expr_containing(file: &AmaroFile, position: Position) -> Result<
     }
 }
 
-/// Given an AmaroFile and a position, finds a field name at the given position,
-/// or None if it doesn't exist.
-pub fn field_name_containing(file: &AmaroFile, position: Position) -> Option<(String, Range)> {
+/// Given an AmaroFile and a position, finds a field name at the given position
+/// and the block name, or None if it doesn't exist.
+/// First elt: Block name
+/// Second elt: Field name
+/// Third elt: Range of field
+pub fn field_name_containing(file: &AmaroFile, position: Position) -> Option<(String, String, Range)> {
     // i know this looks kinda horrible.
     // all this does is find a field (if one exists) which this position overlaps.
-    let found_field: Option<&crate::ast::Field> = file.blocks.iter().find_map(|block| {
+    let found_tuple: Option<(&crate::ast::Block, &crate::ast::Field)> = file.blocks.iter().find_map(|block| {
         match &block.content {
             crate::ast::BlockContent::Fields(block_items) => block_items,
         }
         .iter()
         .filter_map(|elt| match elt {
-            crate::ast::BlockItem::Field(f) => Some(f),
+            crate::ast::BlockItem::Field(f) => Some((block, f)),
             _ => None,
         })
-        .find(|field| field.key_range.start <= position && field.key_range.end > position)
+        .find(|(_, field)| field.key_range.start <= position && field.key_range.end > position)
     });
 
     // map to our option
-    found_field.map(|field| (field.key.clone(), field.key_range))
+    found_tuple.map(|(block, field)| (block.kind.clone(), field.key.clone(), field.key_range))
 }
 
 /// In an expression, finds the smallest subexpression containing the goal position, or None if the goal position isn't even in the original expression.
