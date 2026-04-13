@@ -105,34 +105,86 @@ pub fn check_semantics(file: &AmaroFile) -> (Vec<Diagnostic>, HashMap<NodeId, Ty
             if let BlockItem::Field(field) = item {
                 present_keys.push(field.key.as_str());
 
-                let mut inf_data = InferenceData {
-                    sym_table: &mut sym_table,
-                    diagnostics: &mut diagnostics,
-                    type_map: &mut type_map,
-                    user_def_table: &user_def_table,
-                };
-                let field_type = infer_expr_type(&field.value, &mut inf_data);
+                
 
                 // 3.1. Gate Validation in 'routed_gates' fields
                 if block_name == "RouteInfo" && field.key == "routed_gates" {
                     validate_gates(&field.value, &mut diagnostics);
                 }
 
-                // 3.2. Enforce Float type on 'cost' field
-                if field.key == "cost"
-                    && field_type != Type::Unknown
-                    && !types_compatible(&field_type, &Type::Float)
-                {
-                    diagnostics.push(Diagnostic {
-                        range: field.value.range,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        message: format!(
-                            "'cost' must return Float, got '{}'. \
-                             Hint: Comparisons return Bool — use arithmetic instead.",
-                            field_type
-                        ),
-                        ..Default::default()
-                    });
+                let mut last_generic_num: u8 = 0;
+
+                let mut inf_data = InferenceData {
+                    sym_table: &mut sym_table,
+                    diagnostics: &mut diagnostics,
+                    type_map: &mut type_map,
+                    user_def_table: &user_def_table,
+                    last_generic_num: &mut last_generic_num
+                };
+
+                let mut field_type = infer_expr_type(&field.value, &mut inf_data);
+
+                
+
+                // 3.2. Enforce types on all fields
+                // Additionally, use the field type to help inform the expression type.
+                if field_type != Type::Unknown {
+                    // get the expected type of the field
+                    if let Some(field_info) = builtins::field_lookup(block_name, &field.key) {
+                        if let Type::Function { return_type, .. } = &field_info.typ {
+                            // need that the return type is compatible with the provided
+
+                            // first, try to overlay the types
+
+                            if overlay_type(&mut field_type, return_type) {
+                                // need to go and retype
+                                retype(&field.value, field_type.clone(), &mut inf_data);
+                            }
+
+                            // SPECIAL EXCEPTION: Put in the case that single elements
+                            // can be autocast to a vec.
+                            // This is like when we have just 'routed_gates = CX'.
+                            // routed_gates expects a list, but with one element, the
+                            // parser doesn't understand that the RHS is a list.
+                            let mut compatible_flag: bool = false; 
+                            if let Type::Vec(inner) = &(**return_type) { // wow look at this line haha
+                                if types_compatible(inner, &field_type) {
+                                    compatible_flag = true;
+                                }
+                            }
+
+                            if !compatible_flag && types_compatible(&return_type, &field_type) {
+                                compatible_flag = true;
+                            }
+
+                            
+
+                            if !compatible_flag {
+                                diagnostics.push(Diagnostic {
+                                    range: field.key_range,
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    message: format!(
+                                        "Field '{}' in {} must return {}, got '{}'.",
+                                        field.key,
+                                        block_name,
+                                        return_type,
+                                        field_type
+                                    ),
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                    } else {
+                        // unknown field
+                        // show message to user but don't error, we might just
+                        // not have the builtin 
+                        diagnostics.push(Diagnostic {
+                            range: field.key_range,
+                            severity: Some(DiagnosticSeverity::INFORMATION),
+                            message: format!("Unknown field '{}' in {}", field.key, block_name),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
         }
@@ -234,13 +286,16 @@ impl TypeMap {
     /// to make a more specific type.
     pub fn overlay(&mut self, id: NodeId, new_type: &Type) {
         match self.map.get_mut(&id) {
-            Some(prev_type) => overlay_type(prev_type, new_type),
+            Some(prev_type) => {
+                overlay_type(prev_type, new_type);
+            },
             None => {
                 self.set(id, new_type.clone());
             }
         }
     }
 }
+
 
 /// Overlays one type onto another.
 /// When we "overlay" a type, we are providing more specific information about
@@ -251,7 +306,9 @@ impl TypeMap {
 ///
 /// Think of this like in image editing, where we overlay a foreground onto
 /// a background. Generics and unknowns are transparent pixels.
-pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) {
+/// 
+/// Returns true if any modification was made to the background type.
+pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) -> bool {
     match background_type {
         Type::Int
         | Type::Float
@@ -264,10 +321,12 @@ pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) {
         | Type::ArchT
         | Type::StateT
         | Type::InstrT
-        | Type::UserDef(_) => {}
+        | Type::UserDef(_) => false,
         Type::Vec(b_inner) => {
             if let Type::Vec(f_inner) = foreground_type {
-                overlay_type(b_inner, f_inner);
+                overlay_type(b_inner, f_inner)
+            } else {
+                false
             }
         }
         Type::Tuple(b_items) => {
@@ -275,12 +334,16 @@ pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) {
                 b_items
                     .iter_mut()
                     .zip(f_items.iter())
-                    .for_each(|elt| overlay_type(elt.0, elt.1));
+                    .fold(false, |acc, elt| overlay_type(elt.0, elt.1) || acc) // NOTE: order of overlay_type before acc in || is important so it is always ran
+            } else {
+                false
             }
         }
         Type::Option(b_inner) => {
             if let Type::Option(f_inner) = foreground_type {
-                overlay_type(b_inner, f_inner);
+                overlay_type(b_inner, f_inner)
+            } else {
+                false
             }
         }
         Type::Function {
@@ -292,23 +355,41 @@ pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) {
                 return_type: f_ret,
             } = foreground_type
             {
-                b_params
+                let res1 = overlay_type(b_ret, f_ret);
+
+                let res2 = b_params
                     .iter_mut()
                     .zip(f_params.iter())
-                    .for_each(|elt| overlay_type(elt.0, elt.1));
-                overlay_type(b_ret, f_ret);
+                    .fold(false, |acc, elt| overlay_type(elt.0, elt.1) || acc); // NOTE: order of overlay_type before acc in || is important so it is always ran
+                
+                res1 || res2 // have to do it like this to make sure they both get executed
+            } else {
+                false
             }
         }
-        Type::Generic(_) => {
+        Type::Generic(a) => {
+            if let Type::Generic(b) = foreground_type {
+                false
+            } else 
             if !matches!(foreground_type, Type::Unknown) {
                 *background_type = foreground_type.clone();
+                true
+            } else {
+                false
             }
         }
         Type::Unknown => {
-            *background_type = foreground_type.clone();
+            if !matches!(foreground_type, Type::Unknown) {
+                *background_type = foreground_type.clone();
+                true
+            } else {
+                false
+            }
         }
     }
 }
+
+
 
 /// Aggregate of the args passed to infer_expr_type,
 /// so we can easily change these without having to change 10000 call signatures
@@ -317,6 +398,7 @@ pub struct InferenceData<'a> {
     pub diagnostics: &'a mut Vec<Diagnostic>,
     pub type_map: &'a mut TypeMap,
     pub user_def_table: &'a UserDefTable,
+    pub last_generic_num: &'a mut u8,
 }
 
 /// Infers the type of an expression using the current symbol table.
@@ -324,12 +406,15 @@ pub struct InferenceData<'a> {
 /// Recursively walks the AST and emits type errors for incompatibilities.
 /// Uses `Unknown` for leniency to avoid false positives.
 pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type {
+    // generics can only be introduced through built-ins.
+
+
     let found_type = match &expr.kind {
         ExprKind::IntLiteral(_) => Type::Int,
         ExprKind::FloatLiteral(_) => Type::Float,
         ExprKind::BoolLiteral(_) => Type::Bool,
         ExprKind::StringLiteral(_) => Type::String,
-        ExprKind::None => Type::Option(Box::new(Type::Unknown)),
+        ExprKind::None => Type::Option(Box::new(Type::Generic(0))), // TODO test this bhvr
         ExprKind::Identifier(name) => {
             // always first look up in symbol table
             inference_data
@@ -346,8 +431,14 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         .unwrap_or_else(|| {
                             // check built-ins
 
+                            // TODOGEN
                             builtins::get_raw_built_in(name.as_str())
-                                .map(|elt| elt.typ.clone())
+                                .map(|elt| {
+                                    // shift the generics so they are unique
+                                    let mut new_type = elt.typ.clone();
+                                    builtins::make_generics_unique(&mut new_type, inference_data.last_generic_num);
+                                    new_type
+                                })
                                 .unwrap_or_else(|| {
                                     match inference_data.user_def_table.get_fields(name) {
                                         Some(_) => Type::UserDef(name.clone()),
@@ -367,7 +458,9 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
         }
         ExprKind::List(items) => {
             if items.is_empty() {
-                Type::Vec(Box::new(Type::Unknown))
+                let cur_generic = *inference_data.last_generic_num;
+                *inference_data.last_generic_num += 1;
+                Type::Vec(Box::new(Type::Generic(cur_generic)))
             } else {
                 let first_type = infer_expr_type(&items[0], inference_data);
                 for item in &items[1..] {
@@ -463,19 +556,39 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 });
             }
 
-            let then_type = infer_expr_type(then_branch, inference_data);
-            let else_type = infer_expr_type(else_branch, inference_data);
+            infer_expr_type(then_branch, inference_data);
+            infer_expr_type(else_branch, inference_data);
+            let mut then_type = inference_data.type_map.get(&then_branch.id).unwrap().clone();
+            let mut else_type = inference_data.type_map.get(&else_branch.id).unwrap().clone();
 
-            if !types_compatible(&then_type, &else_type) {
-                inference_data.diagnostics.push(Diagnostic {
-                    range: expr.range,
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    message: "Then and else branches of if-then-else must have compatible types."
-                        .to_string(),
-                    ..Default::default()
-                });
+            // TODO see if the types can be overlayed.
+            let overlayed_dir_1 = overlay_type(&mut then_type, &else_type);
+            let overlayed_dir_2 = overlay_type(&mut else_type, &then_type);
+
+            if overlayed_dir_1 {
+                retype(then_branch, then_type.clone(), inference_data);
+                eprintln!("Overlayed from else onto then");
             }
-            then_type
+            if overlayed_dir_2 {
+                retype(else_branch, else_type.clone(), inference_data);
+                eprintln!("Overlayed from then onto else");
+            }
+
+            if overlayed_dir_1 || overlayed_dir_2 {
+                // we need to rerun inference, because things have changed on this expr
+                return infer_expr_type(expr, inference_data);
+            } else {
+
+                if !types_compatible(&then_type, &else_type) {
+                    inference_data.diagnostics.push(Diagnostic {
+                        range: expr.range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        message: format!("Then and else branches of if-then-else must have compatible types. Then: {}, Else: {}", then_type, else_type),
+                        ..Default::default()
+                    });
+                }
+                then_type
+            }
         }
         ExprKind::FunctionCall { function, args } => {
             infer_expr_type(function, inference_data);
@@ -505,6 +618,8 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         // 2. using inferred types, try to build generic map as best as can
                         // 3. retype all the expressions using generic map as best as can
                         // 4. if still contains generic type, return to 1
+
+                        // TODOGEN
 
                         let mut generic_map = HashMap::new();
                         let inferred_args: Vec<Type> = args
@@ -554,21 +669,27 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             // should be slowly removing generic types i think
 
                             return infer_expr_type(expr, inference_data);
-                            // } else {
-                            //     (**return_type).clone()
-                            // }
                         }
                     } else {
                         for (i, (param_type, arg)) in params.iter().zip(args).enumerate() {
                             let arg_type = infer_expr_type(arg, inference_data);
+
+                            // try to retype to the parameter type, if possible
+                            // this deals with generic situations.
+                            // for example, sps we have the function |Vec<Transition>| -> float
+                            // if we pass Vec() into the function, this will determine that
+                            // the Vec() is type Vec<Transition>.
+                            retype(arg, param_type.clone(), inference_data);
+
+                            let arg_type = inference_data.type_map.get(&arg.id).unwrap();
 
                             // Following Logic
                             // 1. If param_type Unknown, Accept
                             // 2. If arg_type Unknown, Accept (Avoid Cascading Errors)
                             // 3. Otherwise, Check Compatibility
                             if *param_type != Type::Unknown
-                                && arg_type != Type::Unknown
-                                && !types_compatible(param_type, &arg_type)
+                                && *arg_type != Type::Unknown
+                                && !types_compatible(param_type, arg_type)
                             {
                                 inference_data.diagnostics.push(Diagnostic {
                                     range: arg.range,
@@ -617,6 +738,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
 
                 match type_from_user_def {
                     Some(t) => t.clone(),
+                    // TODOGEN
                     None => match builtins::check_built_in_after_type(&obj_type, field) {
                         Some(builtins::Owner::Owned(built_in)) => built_in.typ.clone(),
                         Some(builtins::Owner::Borrowed(built_in)) => built_in.typ.clone(),
@@ -635,16 +757,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     },
                 }
             }
-
-            // TODO remove this if it isn't useful!
-
-            // Type::Tuple(elements) => {
-            //     if let Ok(idx) = field.parse::<usize>() {
-            //         elements.get(idx).cloned().unwrap_or(Type::Unknown)
-            //     } else {
-            //         Type::Unknown
-            //     }
-            // }
         }
 
         ExprKind::StructLiteral { name, fields } => {
@@ -667,16 +779,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 });
                 Type::Unknown
             }
-
-            // let mut field_types = HashMap::new();
-            // for (key, value) in fields {
-            //     let val_type = infer_expr_type(value, inference_data);
-            //     field_types.insert(key.clone(), val_type);
-            // }
-            // Type::Struct {
-            //     name: name.clone(),
-            //     fields: field_types,
-            // }
         }
         ExprKind::IndexAccess { object, index } => {
             let obj_type = infer_expr_type(object, inference_data);
@@ -1293,18 +1395,25 @@ pub fn contains_generic(typ: &Type) -> bool {
     }
 }
 
-/// Given an expression, changes its type to a new type. Does so recursively.
+/// Given an expression, PASSIVELY changes its type to a new type. Does so
+/// recursively.
+/// 
+/// A "passive" change means that only generics and unknowns are effected, like
+/// an overlay. It will NOT change any aspects of the type that are non-generics
+/// and non-unknowns.
+/// 
 /// This is helpful for if we have some type that uses generics where we cannot
 /// determine the type, then later discover the generic type.
 /// For instance, if we have something with the type "|?| -> Vec<?>", we can
 /// come back and tell it that it is actually "|Int| -> Vec<Float>". It will
 /// recursively (as best it can) retype all the subexpressions to match this
 /// format.
+/// 
 /// Doesn't retype identifiers...
 pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
     // eprintln!("  Range: {:?}", expr.range);
     if let Some(old_type) = inference_data.type_map.get(&expr.id) {
-        eprintln!("Retyping {} from {} to {}", expr.kind, old_type, new_type);
+        // eprintln!("Retyping {} from {} to {}", expr.kind, old_type, new_type);
     } else {
         eprintln!(":::HEY! Retyping {} to {}, but no old type existed!", expr.kind, new_type);
     }
@@ -1339,11 +1448,14 @@ pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
         ExprKind::StructLiteral { .. } => {
             // nothing special to do here
         }
-        ExprKind::FunctionCall { .. } => {
-            // nothing special to do here
+        ExprKind::FunctionCall { function, .. } => {
+            // TODO retype the function's return type to be whatever this type is
         }
         ExprKind::FieldAccess { .. } => {
-            // nothing special to do here
+            // Well.. we could retype the original if it is generic and our generic
+            // depends on it, which is very complex & only happens with built-ins
+            // like Vec and Option. Could be a stretch feature, because it's not
+            // a huge deal.
         }
         ExprKind::IndexAccess { object, .. } => {
             // can retype the object as a vec of elements of this type
@@ -1375,8 +1487,44 @@ pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
             // return type of body is the type of whole let expr
             retype(body, new_type.clone(), inference_data);
         }
-        ExprKind::BinaryOp { .. } => todo!(),
-        ExprKind::UnaryOp { .. } => todo!(),
+        ExprKind::BinaryOp { op, left, right } => {
+            // TODO This implementation double-implements some logic that is also
+            // elsewhere. Should unify this, but will be challenging to do so.
+            match op {
+                BinaryOperator::Add |
+                BinaryOperator::Sub |
+                BinaryOperator::Mul |
+                BinaryOperator::Div |
+                BinaryOperator::Mod => {
+                    // then just say that the left type and right type should be
+                    // this too
+                    retype(left, new_type.clone(), inference_data);
+                    retype(right, new_type.clone(), inference_data);
+                },
+                BinaryOperator::Eq |
+                BinaryOperator::Ne => {
+                    // uhhh, well this is a boolean.
+                    // we could at least be able to retype left and right to be
+                    // equal types. which we take is unclear. depends on which
+                    // has generics.
+                },
+                BinaryOperator::Lt |
+                BinaryOperator::Le |
+                BinaryOperator::Gt |
+                BinaryOperator::Ge |
+                BinaryOperator::And |
+                BinaryOperator::Or => {
+                    // same as above
+                }
+                BinaryOperator::Range => todo!(),
+                BinaryOperator::Tensor => todo!(),
+            }
+        },
+        ExprKind::UnaryOp { operand, .. } => {
+            // currently, type type of any unary op will always be the same
+            // as whatever's beneath
+            retype(operand, new_type.clone(), inference_data);
+        },
         ExprKind::Some(inner) => {
             // can retype inner too
             if let Type::Option(ref inner_type) = new_type {
@@ -1526,6 +1674,7 @@ mod tests {
             diagnostics: &mut diags,
             type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
+            last_generic_num: &mut 0,
         };
 
         let def_range = Range {
@@ -1681,6 +1830,7 @@ mod tests {
             diagnostics: &mut diags,
             type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
+            last_generic_num: &mut 0,
         };
 
         let def_range = Range {
@@ -1756,6 +1906,7 @@ mod tests {
             diagnostics: &mut diags,
             type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
+            last_generic_num: &mut 0
         };
 
         let def_range = Range {

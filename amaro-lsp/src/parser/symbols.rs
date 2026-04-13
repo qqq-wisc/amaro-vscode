@@ -97,6 +97,54 @@ impl Type {
             },
         }
     }
+    
+    /// Markdown doesn't render <> properly.
+    /// So, use this for rendering those.
+    /// Uses standard formatting usually.
+    pub fn to_markdown_display(&self) -> String {
+        match self {
+            Type::Int |
+            Type::Float |
+            Type::Bool |
+            Type::String |
+            Type::Location |
+            Type::Qubit |
+            Type::QubitMap |
+            Type::Gate |
+            Type::ArchT |
+            Type::StateT |
+            Type::InstrT |
+            Type::Unknown |
+            Type::UserDef(_) |
+            Type::Generic(_)=> format!("{}", self), // fall back to default, no nesting
+            Type::Function { params, return_type } => {
+                let mut iter = params.iter();
+                let mut string = String::new();
+                if let Some(first) = iter.next() {
+                    string += first.to_markdown_display().as_str();
+                    for item in iter {
+                        string += ", ";
+                        string += item.to_markdown_display().as_str();
+                    }
+                }
+                format!("|{}| -> {}", string, return_type.to_markdown_display().as_str())
+            },
+            Type::Tuple(items) => {
+                let mut iter = items.iter();
+                let mut string = String::new();
+                if let Some(first) = iter.next() {
+                    string += first.to_markdown_display().as_str();
+                    for item in iter {
+                        string += ", ";
+                        string += item.to_markdown_display().as_str();
+                    }
+                }
+                format!("({})", string)
+            },
+            Type::Vec(inner) => format!("Vec&lt;{}&gt;", inner.to_markdown_display()),
+            Type::Option(inner) => format!("Option&lt;{}&gt;", inner.to_markdown_display()),
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -137,10 +185,10 @@ impl std::fmt::Display for Type {
                 f.write_char('|')?;
                 let mut iter = params.iter();
                 if let Some(first) = iter.next() {
-                    write!(f, "{}", first)?;
+                    first.fmt(f)?;
                     for item in iter {
                         f.write_str(", ")?;
-                        write!(f, "{}", item)?;
+                        item.fmt(f)?;
                     }
                 }
                 f.write_str("| -> ")?;

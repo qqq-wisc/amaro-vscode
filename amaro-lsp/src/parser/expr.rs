@@ -767,3 +767,22 @@ fn parse_string_literal<'a>(
         ))
     }
 }
+
+
+#[test]
+fn test_temp() {
+    let my_str = "(jacob.jacobman.value)()*()*))".to_string();
+    match parse_expr(&my_str, &my_str) {
+        Ok(r) => {
+            println!("We parsed it as:");
+            println!("{}", r.1.kind);
+
+            if let ExprKind::FieldAccess { object, field } = r.1.kind {
+                println!("Obj: {}, field: {}", object.kind, field);
+            }
+        },
+        Err(e) => {
+            println!("Failed to parse it");
+        },
+    }
+}

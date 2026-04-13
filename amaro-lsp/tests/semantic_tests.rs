@@ -1,6 +1,7 @@
 use amaro_lsp::ast::*;
 use amaro_lsp::parser::{check_semantics, parse_file};
-use tower_lsp::lsp_types::DiagnosticSeverity;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+
 
 const MOCK_MANDATORY_BLOCKS: &str = r#"
 RouteInfo:
@@ -9,9 +10,22 @@ RouteInfo:
 
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
+
+pub fn diags_no_errors(diags: &Vec<Diagnostic>) -> bool {
+    !diags.iter().any(|elt| match elt.severity {
+        Some(severity) => match severity {
+            DiagnosticSeverity::ERROR => true,
+            DiagnosticSeverity::WARNING => true,
+            DiagnosticSeverity::HINT => false,
+            DiagnosticSeverity::INFORMATION => false,
+            _ => true,
+        },
+        None => false,
+    })
+}
 
 // Core Semantic Tests
 
@@ -59,7 +73,7 @@ fn test_all_valid_no_errors() {
     let (diags, _, _) = check_semantics(&file);
 
     assert!(
-        diags.is_empty(),
+        diags_no_errors(&diags),
         "Expected no diagnostics for valid input, got: {:?}",
         diags
     );
@@ -92,7 +106,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 RouteInfo:
     routed_gates = T
@@ -151,7 +165,7 @@ RouteInfo:
 
 TransitionInfo:
     cost = 1.0
-    apply = identity
+    apply = identity_application(step)
 "#;
 
     let file = parse_file(&input).unwrap();
@@ -183,7 +197,7 @@ RouteInfo:
 TransitionInfo:
     Transition{edge : (Location, Location)}
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -217,7 +231,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -252,7 +266,7 @@ RouteInfo:
     realize_gate = Some(value)
 TransitionInfo:
     cost = 1.0
-    apply = identity
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -290,7 +304,7 @@ RouteInfo:
     realize_gate = (Pauli, PauliMeasurement)
 TransitionInfo:
     cost = 1.0
-    apply = identity
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -315,7 +329,7 @@ RouteInfo:
     realize_gate = Some(value)
 TransitionInfo:
     cost = 1.0
-    apply = identity
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -355,7 +369,7 @@ fn test_semantic_checks_work_with_bracket_syntax() {
     ]
     TransitionInfo[
         cost = 1.0
-        apply = []
+        apply = identity_application(step)
         get_transitions = []
     ]
     "#;
@@ -363,7 +377,7 @@ fn test_semantic_checks_work_with_bracket_syntax() {
     let file = parse_file(input).unwrap();
     let (diags, _, _) = check_semantics(&file);
     assert!(
-        diags.is_empty(),
+        diags_no_errors(&diags),
         "Semantics should work for Bracket syntax too"
     );
 }
@@ -404,7 +418,7 @@ RouteInfo:
                    else None
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -431,7 +445,7 @@ RouteInfo:
     realize_gate = State.gates()
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -510,7 +524,7 @@ fn test_value_swap_function() {
     let input = r#"
 RouteInfo:
     routed_gates = CX
-    realize_gate = []
+    realize_gate = Vec()
 TransitionInfo:
     cost = 1.0
     apply = value_swap(Location(0), Location(1))
@@ -540,7 +554,7 @@ RouteInfo:
     realize_gate = State.map[Gate.qubits[0]]
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -574,7 +588,7 @@ RouteInfo:
     realize_gate = map(|x| -> x, [1, 2, 3])
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -601,7 +615,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     cost = fold(0.0, |acc, x| -> acc, [1.0, 2.0, 3.0])
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
 
@@ -624,7 +638,7 @@ RouteInfo:
     realize_gate = map(|item| -> item, [CX, T])
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
 "#;
 
     let file = parse_file(input).unwrap();
@@ -650,7 +664,7 @@ RouteInfo:
     realize_gate = let temp = CX in temp
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
 "#;
 
     let file = parse_file(input).unwrap();
@@ -674,7 +688,7 @@ RouteInfo:
     realize_gate = State.map[Gate.qubits[0]]
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -699,7 +713,7 @@ RouteInfo:
     realize_gate = values(State.map())
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -726,7 +740,7 @@ RouteInfo:
                    else None
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -753,7 +767,7 @@ RouteInfo:
     realize_gate = map(|x| -> x.implementation.(0), State.implemented_gates())
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -805,7 +819,7 @@ RouteInfo:
     realize_gate = if (1 > 0) then None else None
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -829,7 +843,7 @@ RouteInfo:
     realize_gate = if 1.0 then None else None
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -926,7 +940,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = true
 "#;
     let file = parse_file(input).unwrap();
@@ -949,7 +963,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 1.5
 "#;
     let file = parse_file(input).unwrap();
@@ -974,7 +988,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0
 "#;
     let file = parse_file(input).unwrap();
@@ -998,7 +1012,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 'oops'
 "#;
     let file = parse_file(input).unwrap();
@@ -1023,7 +1037,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = map(1, [])
-    apply = []
+    apply = identity_application(step)
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1045,7 +1059,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1067,7 +1081,7 @@ RouteInfo:
     realize_gate = if !false then [] else []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1092,7 +1106,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = -1
 "#;
     let file = parse_file(input).unwrap();
@@ -1118,7 +1132,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 1.0
 
 GateRealization:
@@ -1147,7 +1161,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = Arch.trap_positions
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1196,7 +1210,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = all_paths(Arch, Arch.locations(), [], [])
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1223,7 +1237,7 @@ ArchInfo:
 
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1283,7 +1297,7 @@ RouteInfo:
     realize_gate = return []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1314,7 +1328,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1365,7 +1379,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1390,7 +1404,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = combinations([], 2)
-    apply = []
+    apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
@@ -1415,7 +1429,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = []
-    apply = []
+    apply = identity_application(step)
     cost = max(min(1, 2), abs(0))
 "#;
     let file = parse_file(input).unwrap();
@@ -1465,7 +1479,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     get_transitions = combinations([], 2)
-    apply = []
+    apply = identity_application(step)
     cost = max(0, abs(0))
 "#;
     let file = parse_file(input).unwrap();
@@ -1492,7 +1506,7 @@ RouteInfo:
         | T -> 2
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
     let file = parse_file(input).unwrap();
@@ -1547,7 +1561,7 @@ RouteInfo:
     realize_gate = []
 TransitionInfo:
     cost = 1.0
-    apply = []
+    apply = identity_application(step)
     get_transitions = []
 "#;
     // If is_keyword works correctly, fields named 'match' or 'with' would be rejected.

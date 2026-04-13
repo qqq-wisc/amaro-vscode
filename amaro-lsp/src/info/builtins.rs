@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::parser::{semantics, symbols::Type};
-use std::{collections::HashMap, sync::OnceLock};
+use std::{collections::{HashMap, HashSet}, sync::OnceLock};
 
 pub enum Owner<'a, T> {
     Owned(T),
@@ -38,7 +38,15 @@ pub struct FieldInfo {
 
 impl FieldInfo {
     pub fn show_details(&self) -> String {
-        format!("## {}\n *In block {}*\n\n{}\n\n{}", self.field_name, self.block_name, self.typ,self.info)
+        let mut type_to_show: &Type = &self.typ;
+        if let Type::Function { params, return_type } = &self.typ {
+            // if no params, just put return type
+            if (params.len() == 0) {
+                type_to_show = return_type;
+            }
+        }
+        
+        format!("## {}\n *In block {}*\n\n{}\n\n{}", self.field_name, self.block_name, type_to_show.to_markdown_display(), self.info)
     }
 }
 
@@ -62,7 +70,7 @@ fn init_fields() -> Vec<FieldInfo> {
                     Type::ArchT,
                     Type::StateT,
                     Type::Gate
-                ], return_type: Box::new(Type::Option(Box::new(Type::UserDef(
+                ], return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
                 "GateRealization".to_string(),
             ))))
             }
@@ -102,6 +110,82 @@ pub fn field_lookup(block_name: &str, field_name: &str) -> Option<&'static Field
 
     data.iter().find(|elt| elt.block_name == block_name && elt.field_name == field_name)
 }
+
+
+/// Given a type from the built-in, makes the generics inside it unique.
+pub fn make_generics_unique(typ: &mut Type, last_generic_num: &mut u8) {
+    let mut generic_set: HashSet<u8> = HashSet::new();
+    generic_visitor(typ, &mut generic_set);
+
+    if generic_set.len() == 0 {
+        return; // nothing else to do
+    }
+
+    // ok great. now, devise generic shifts.
+    // maps from previos value to new value
+    let generic_shifts: HashMap<u8, u8> = generic_set.iter().map(|elt| {
+        let next_generic_num = *last_generic_num;
+        *last_generic_num += 1;
+        (*elt, next_generic_num)
+    }).collect();
+
+
+    // now finally, apply these shifts.
+    generic_shift_applicator(typ, &generic_shifts);
+}
+/// Visits a type, and identifies all the generics inside.
+fn generic_visitor(typ: &Type, set: &mut HashSet<u8>) {
+    match typ {
+        Type::Int |
+        Type::Float |
+        Type::Bool |
+        Type::String |
+        Type::Location |
+        Type::Qubit |
+        Type::QubitMap |
+        Type::Gate |
+        Type::ArchT |
+        Type::StateT |
+        Type::InstrT |
+        Type::UserDef(_) |
+        Type::Unknown => {/* do nothing */}
+        Type::Vec(inner) => generic_visitor(inner, set),
+        Type::Tuple(items) => items.iter().for_each(|elt| generic_visitor(elt, set)),
+        Type::Option(inner) => generic_visitor(inner, set),
+        Type::Function { params, return_type } => {
+            params.iter().for_each(|elt| generic_visitor(elt, set));
+            generic_visitor(return_type, set);
+        },
+        Type::Generic(c) => {set.insert(*c);},
+    }
+}
+
+fn generic_shift_applicator(typ: &mut Type, shifts: &HashMap<u8, u8>) {
+    match typ {
+        Type::Int |
+        Type::Float |
+        Type::Bool |
+        Type::String |
+        Type::Location |
+        Type::Qubit |
+        Type::QubitMap |
+        Type::Gate |
+        Type::ArchT |
+        Type::StateT |
+        Type::InstrT |
+        Type::UserDef(_) |
+        Type::Unknown => {/* do nothing */}
+        Type::Vec(inner) => generic_shift_applicator(inner, shifts),
+        Type::Tuple(items) => items.iter_mut().for_each(|elt| generic_shift_applicator(elt, shifts)),
+        Type::Option(inner) => generic_shift_applicator(inner, shifts),
+        Type::Function { params, return_type } => {
+            params.iter_mut().for_each(|elt| generic_shift_applicator(elt, shifts));
+            generic_shift_applicator(return_type, shifts);
+        },
+        Type::Generic(c) => {*typ = Type::Generic(*shifts.get(c).unwrap());},
+    }
+}
+
 
 /// Given an identifier, gets the "raw" built-in associated with it.
 /// A "raw" built-in is something (usually a function) that is pre-defined
@@ -301,7 +385,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
         BuiltIn {
             parent_type: None,
             identifier: "Vec".to_string(),
-            typ: Type::Function { params: vec![], return_type: Box::new(Type::Vec(Box::new(Type::Unknown))) },
+            typ: Type::Function { params: vec![], return_type: Box::new(Type::Vec(Box::new(Type::Generic(0)))) },
             details: "Constructor for Vec".to_string()
         },
 
@@ -972,7 +1056,7 @@ mod tests {
         BuiltIn {
             parent_type: None,
             identifier: "Vec".to_string(),
-            typ: Type::Function { params: vec![], return_type: Box::new(Type::Vec(Box::new(Type::Unknown))) },
+            typ: Type::Function { params: vec![], return_type: Box::new(Type::Vec(Box::new(Type::Generic(0)))) },
             details: "Constructor for Vec".to_string()
         },
 
@@ -1372,7 +1456,7 @@ mod tests {
             let lookup = lookup.unwrap();
             assert_eq!(lookup.typ, Type::Function {
                 params: vec![Type::ArchT, Type::StateT, Type::Gate],
-                return_type: Box::new(Type::Option(Box::new(Type::UserDef(
+                return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
                     "GateRealization".to_string(),
                 )))),
             });
