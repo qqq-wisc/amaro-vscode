@@ -199,6 +199,7 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
     let user_def_table = UserDefTable::new(file);
     let mut type_map = TypeMap::new();
     let mut string_labels = StringLabels::new();
+    let impl_struct_name = extract_impl_struct_name(file);
 
     // Block Level Validation
     for block in &file.blocks {
@@ -290,6 +291,7 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
                     user_def_table: &user_def_table,
                     generic_table: &mut generic_table,
                     string_labels: &mut string_labels,
+                    impl_struct_name: impl_struct_name.clone(),
                 };
 
                 let mut field_type = register_field(&field.value, &mut inf_data);
@@ -409,6 +411,19 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
         user_def_table,
         string_labels,
     }
+}
+
+fn extract_impl_struct_name(file: &AmaroFile) -> Option<String> {
+    file.blocks
+        .iter()
+        .find(|b| b.kind.eq_ignore_ascii_case("RouteInfo"))
+        .and_then(|b| {
+            let BlockContent::Fields(items) = &b.content;
+            items.iter().find_map(|item| match item {
+                BlockItem::StructDef(s) => Some(s.name.clone()),
+                _ => None,
+            })
+        })
 }
 
 // Validates that gate identifiers are recognized gate types (CX, T, Pauli, PauliMeasurement).
@@ -937,6 +952,7 @@ pub struct InferenceData<'a> {
     pub user_def_table: &'a UserDefTable,
     pub generic_table: &'a mut GenericTable,
     pub string_labels: &'a mut StringLabels,
+    pub impl_struct_name: Option<String>,
 }
 
 /// Precondition: Expr and all subexpressions have a type (even if unknown) in
@@ -1530,8 +1546,25 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     None
                 };
 
-                let outcome_type = match type_from_user_def {
-                    Some(t) => t.clone(),
+                let type_from_context = match (&obj_type, field.as_str()) {
+                    (Type::Gate, "implementation") => inference_data
+                        .impl_struct_name
+                        .as_ref()
+                        .map(|name| Type::UserDef(name.clone())),
+                    (Type::StateT, "implemented_gates") => inference_data
+                        .impl_struct_name
+                        .as_ref()
+                        .map(|name| Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
+                                name.clone(),
+                            )))),
+                        }),
+                    _ => None,
+                };
+
+                let outcome_type = match type_from_user_def.cloned().or(type_from_context) {
+                    Some(t) => t,
                     None => match builtins::check_built_in_after_type(&obj_type, field) {
                         Some(builtins::Owner::Owned(built_in)) => built_in.typ.clone(),
                         Some(builtins::Owner::Borrowed(built_in)) => built_in.typ.clone(),
@@ -2277,6 +2310,7 @@ mod tests {
             user_def_table: &UserDefTable::empty(),
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
+            impl_struct_name: None,
         };
 
         let def_range = Range {
@@ -2434,6 +2468,7 @@ mod tests {
             user_def_table: &UserDefTable::empty(),
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
+            impl_struct_name: None,
         };
 
         let def_range = Range {
@@ -2511,6 +2546,7 @@ mod tests {
             user_def_table: &UserDefTable::empty(),
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
+            impl_struct_name: None,
         };
 
         let def_range = Range {
