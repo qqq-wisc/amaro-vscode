@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, MarkupContent,
 };
 
-use crate::parser::{semantics, symbols::Type};
+use crate::parser::{FetchAndAdd, GenericTable, semantics, symbols::Type};
 use std::{collections::{HashMap, HashSet}, sync::OnceLock};
 
 pub enum Owner<'a, T> {
@@ -113,7 +113,7 @@ pub fn field_lookup(block_name: &str, field_name: &str) -> Option<&'static Field
 
 
 /// Given a type from the built-in, makes the generics inside it unique.
-pub fn make_generics_unique(typ: &mut Type, last_generic_num: &mut u8) {
+pub fn make_generics_unique(typ: &mut Type, next_generic_num: &mut FetchAndAdd<u8>) {
     let mut generic_set: HashSet<u8> = HashSet::new();
     generic_visitor(typ, &mut generic_set);
 
@@ -124,9 +124,7 @@ pub fn make_generics_unique(typ: &mut Type, last_generic_num: &mut u8) {
     // ok great. now, devise generic shifts.
     // maps from previos value to new value
     let generic_shifts: HashMap<u8, u8> = generic_set.iter().map(|elt| {
-        let next_generic_num = *last_generic_num;
-        *last_generic_num += 1;
-        (*elt, next_generic_num)
+        (*elt, next_generic_num.next())
     }).collect();
 
 
@@ -227,12 +225,13 @@ pub fn get_all_built_ins_after_type(t1: &Type) -> Option<Owner<'static, Vec<Buil
     let data = GLOBAL.get_or_init(init_global);
 
     // if type has generics, then we need to be able to understand this.
-    let res: Option<(&Vec<BuiltIn>, HashMap<u8, Type>)> =
+    let res: Option<(&Vec<BuiltIn>, GenericTable)> =
         data.iter().filter(|elt| elt.0.is_some()).find_map(|elt| {
-            let mut map = HashMap::new();
-            match semantics::infer_generic_type(elt.0.as_ref().unwrap(), t1, &mut map) {
+            let mut generic_table = GenericTable::new();
+            generic_table.reset_dirty_flag();
+            match generic_table.find_generics_in_correspondent_types(elt.0.as_ref().unwrap(), t1) {
                 Err(_) => None,
-                Ok(_) => Some((elt.1.as_ref(), map)),
+                Ok(_) => Some((elt.1.as_ref(), generic_table)),
             }
         });
 
@@ -242,8 +241,8 @@ pub fn get_all_built_ins_after_type(t1: &Type) -> Option<Owner<'static, Vec<Buil
             None
         }
         Some(pair) => {
-            if pair.1.is_empty() {
-                // we can just output the vec, bc it is not generic
+            if !pair.1.is_dirty() {
+                // we can just output the vec, bc there are no generics
                 Some(Owner::Borrowed(pair.0))
             } else {
                 // well, we have some elements in the map.
@@ -279,22 +278,23 @@ pub fn check_built_in_after_type(t1: &Type, identifier: &str) -> Option<Owner<'s
     let data = GLOBAL.get_or_init(init_global);
 
     match data.iter().filter(|elt| elt.0.is_some()).find_map(|elt| {
-        let mut map = HashMap::new();
-        match semantics::infer_generic_type(elt.0.as_ref().unwrap(), t1, &mut map) {
-            Ok(_) => Some((&elt.1, map)),
+        let mut generic_table = GenericTable::new();
+        generic_table.reset_dirty_flag();
+        match generic_table.find_generics_in_correspondent_types(elt.0.as_ref().unwrap(), t1) {
+            Ok(_) => Some((&elt.1, generic_table)),
             Err(_) => None,
         }
     }) {
         None => None, // did not find assoc type in our data
-        Some((built_in_vec, map)) => {
+        Some((built_in_vec, table)) => {
             built_in_vec
                 .iter()
                 .find(|elt| elt.identifier == identifier)
                 .map(|found| {
-                    if map.is_empty() {
+                    if !table.is_dirty() {
                         Owner::Borrowed(found)
                     } else {
-                        match semantics::degenerisize(&found.typ, &map) {
+                        match semantics::degenerisize(&found.typ, &table) {
                             (false, _) => Owner::Borrowed(found), // This case is a fall back if something goes wrong
                             // LS: Investigate this case and see if it's needed or what we could
                             // maybe do about it.

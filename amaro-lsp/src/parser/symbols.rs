@@ -145,6 +145,76 @@ impl Type {
             Type::Option(inner) => format!("Option&lt;{}&gt;", inner.to_markdown_display()),
         }
     }
+
+    /// Determines whether the type has generics.
+    pub fn contains_generic(&self) -> bool {
+        match self {
+            Type::Generic(_) => true,
+            Type::Int |
+            Type::Float |
+            Type::Bool |
+            Type::String |
+            Type::Location |
+            Type::Qubit |
+            Type::QubitMap |
+            Type::Gate |
+            Type::ArchT |
+            Type::StateT |
+            Type::InstrT |
+            Type::UserDef(_) |
+            Type::Unknown => false,
+            Type::Vec(inner) => inner.contains_generic(),
+            Type::Tuple(items) => items.iter().any(|f| f.contains_generic()),
+            Type::Option(inner) => inner.contains_generic(),
+            Type::Function { params, return_type } => return_type.contains_generic() || params.iter().any(|f| f.contains_generic()),
+        }
+    }
+
+    pub fn contains_unknown(&self) -> bool {
+        match self {
+            Type::Unknown => true,
+            Type::Generic(_) |
+            Type::Int |
+            Type::Float |
+            Type::Bool |
+            Type::String |
+            Type::Location |
+            Type::Qubit |
+            Type::QubitMap |
+            Type::Gate |
+            Type::ArchT |
+            Type::StateT |
+            Type::InstrT |
+            Type::UserDef(_) => false,
+            Type::Vec(inner) => inner.contains_unknown(),
+            Type::Tuple(items) => items.iter().any(|f| f.contains_unknown()),
+            Type::Option(inner) => inner.contains_unknown(),
+            Type::Function { params, return_type } => return_type.contains_unknown() || params.iter().any(|f| f.contains_unknown()),
+        }
+    }
+
+    pub fn contains_generic_or_unknown(&self) -> bool {
+        match self {
+            Type::Unknown => true,
+            Type::Generic(_) => true,
+            Type::Int |
+            Type::Float |
+            Type::Bool |
+            Type::String |
+            Type::Location |
+            Type::Qubit |
+            Type::QubitMap |
+            Type::Gate |
+            Type::ArchT |
+            Type::StateT |
+            Type::InstrT |
+            Type::UserDef(_) => false,
+            Type::Vec(inner) => inner.contains_generic_or_unknown(),
+            Type::Tuple(items) => items.iter().any(|f| f.contains_generic_or_unknown()),
+            Type::Option(inner) => inner.contains_generic_or_unknown(),
+            Type::Function { params, return_type } => return_type.contains_generic_or_unknown() || params.iter().any(|f| f.contains_generic_or_unknown()),
+        }
+    }
 }
 
 impl std::fmt::Display for Type {

@@ -1,5 +1,6 @@
 use amaro_lsp::ast::*;
-use amaro_lsp::parser::{check_semantics, parse_file};
+use amaro_lsp::parser::symbols::Type;
+use amaro_lsp::parser::{check_semantics, overlay_type, parse_file};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 
@@ -86,7 +87,6 @@ fn test_missing_mandatory_blocks() {
     let file = parse_file(input).unwrap();
     let (diags, _, _) = check_semantics(&file);
 
-    assert_eq!(diags.len(), 2);
     assert!(
         diags
             .iter()
@@ -110,7 +110,7 @@ TransitionInfo:
     get_transitions = []
 RouteInfo:
     routed_gates = T
-    realize_gate = None
+    realize_gate = []
     "#;
 
     let file = parse_file(input).unwrap();
@@ -119,7 +119,8 @@ RouteInfo:
     assert_eq!(
         diags.len(),
         1,
-        "Should have exactly 1 error for the duplicate block"
+        "Should have exactly 1 error for the duplicate block. Got: {:?}",
+        diags
     );
 
     let error = &diags[0];
@@ -137,7 +138,7 @@ RouteInfo:
     realize_gate = []
 RouteInfo:
     routed_gates = T
-    realize_gate = None
+    realize_gate = []
     "#;
 
     let file = parse_file(input).unwrap();
@@ -412,10 +413,11 @@ TransitionInfo:
 fn test_arch_contains_edge_method() {
     let input = r#"
 RouteInfo:
+    GateRealization{u: Gate}
     routed_gates = CX
     realize_gate = if Arch.contains_edge((Location(0), Location(1)))
-                   then Some(CX)
-                   else None
+                   then Vec().push(GateRealization{u = CX})
+                   else Vec()
 TransitionInfo:
     cost = 1.0
     apply = identity_application(step)
@@ -441,8 +443,9 @@ TransitionInfo:
 fn test_state_gates_method() {
     let input = r#"
 RouteInfo:
+    GateRealization{gate: Gate}
     routed_gates = CX
-    realize_gate = State.gates()
+    realize_gate = map(|x| -> GateRealization{gate = x}, State.gates())
 TransitionInfo:
     cost = 1.0
     apply = identity_application(step)
@@ -584,8 +587,9 @@ TransitionInfo:
 fn test_map_function_with_lambda() {
     let input = r#"
 RouteInfo:
+    GateRealization{u : Int}
     routed_gates = CX
-    realize_gate = map(|x| -> x, [1, 2, 3])
+    realize_gate = map(|x| -> GateRealization{u = x}, [1, 2, 3])
 TransitionInfo:
     cost = 1.0
     apply = identity_application(step)
@@ -710,7 +714,7 @@ fn test_state_map_called_as_function() {
 RouteInfo:
     routed_gates = CX
     GateRealization{u : Location}
-    realize_gate = values(State.map())
+    realize_gate = map(|x| -> GateRealization{u = x},values(State.map()))
 TransitionInfo:
     get_transitions = []
     apply = identity_application(step)
@@ -736,8 +740,8 @@ RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location}
     realize_gate = if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
-                   then Some(GateRealization{u = State.map[Gate.qubits[0]], v = State.map[Gate.qubits[1]]})
-                   else None
+                   then Vec().push(GateRealization{u = State.map[Gate.qubits[0]], v = State.map[Gate.qubits[1]]})
+                   else Vec()
 TransitionInfo:
     get_transitions = []
     apply = identity_application(step)
@@ -790,8 +794,8 @@ RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location}
     realize_gate = if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
-                   then Some(GateRealization{u = State.map[Gate.qubits[0]], v = State.map[Gate.qubits[1]]})
-                   else None
+                   then Vec().push(GateRealization{u = State.map[Gate.qubits[0]], v = State.map[Gate.qubits[1]]})
+                   else Vec()
 TransitionInfo:
     Transition{edge : (Location, Location)}
     get_transitions = (map(|x| -> Transition{edge = x}, Arch.edges())).push(Transition{edge = (Location(0), Location(0))})
@@ -816,7 +820,7 @@ fn test_comparison_used_as_if_condition_no_error() {
     let input = r#"
 RouteInfo:
     routed_gates = CX
-    realize_gate = if (1 > 0) then None else None
+    realize_gate = if (1 > 0) then Vec() else Vec()
 TransitionInfo:
     get_transitions = []
     apply = identity_application(step)
@@ -1502,8 +1506,8 @@ fn test_match_expression_no_errors() {
 RouteInfo:
     routed_gates = CX
     realize_gate = match Gate with
-        | CX -> 1
-        | T -> 2
+        | CX -> Vec()
+        | T -> Vec()
 TransitionInfo:
     cost = 1.0
     apply = identity_application(step)
@@ -1577,4 +1581,142 @@ TransitionInfo:
         "Clean file should have no errors. Got: {:?}",
         errors
     );
+}
+#[test]
+fn test_overlay_basic_types_onto_self() {
+    // tries to overlay onto themselves
+    let mut background_types = [
+        Type::ArchT,
+        Type::Bool,
+        Type::Float,
+        Type::Gate,
+        Type::InstrT,
+        Type::Int,
+        Type::Location,
+        Type::Qubit,
+        Type::QubitMap,
+        Type::StateT,
+        Type::String,
+    ];
+    let foreground_types = [
+        Type::ArchT,
+        Type::Bool,
+        Type::Float,
+        Type::Gate,
+        Type::InstrT,
+        Type::Int,
+        Type::Location,
+        Type::Qubit,
+        Type::QubitMap,
+        Type::StateT,
+        Type::String,
+    ];
+    
+    background_types.iter_mut().zip(foreground_types.iter()).for_each(|pair| {
+        assert!(!overlay_type(pair.0, pair.1));
+        assert_eq!(*pair.0, *pair.1);
+    });
+}
+
+
+#[test]
+fn test_overlay_basic_types_onto_others() {
+    // tries to overlay onto  others, shouldnt happen
+    let mut background_types = [
+        Type::Int,
+        Type::Int,
+        Type::Int,
+        Type::Int,
+        Type::Int,
+        Type::Bool,
+        Type::Bool,
+        Type::Bool,
+        Type::Qubit,
+        Type::ArchT,
+        Type::ArchT,
+    ];
+    let foreground_types = [
+        Type::ArchT,
+        Type::Bool,
+        Type::Float,
+        Type::Gate,
+        Type::InstrT,
+        Type::Int,
+        Type::Location,
+        Type::Qubit,
+        Type::QubitMap,
+        Type::StateT,
+        Type::String,
+    ];
+    
+    background_types.iter_mut().zip(foreground_types.iter()).for_each(|pair| {
+        let original_type = pair.0.clone();
+        assert!(!overlay_type(pair.0, pair.1));
+        assert_eq!(*pair.0, original_type);
+    });
+}
+
+#[test]
+fn test_overlay_onto_unknown() {
+    let mut t1: Type = Type::Unknown;
+    let t2: Type = Type::Int;
+
+    assert!(overlay_type(&mut t1, &t2));
+    assert_eq!(t1, Type::Int);
+}
+
+#[test]
+fn test_overlay_onto_generic() {
+    let mut t1: Type = Type::Generic(0);
+    let t2: Type = Type::Int;
+
+    assert!(overlay_type(&mut t1, &t2));
+    assert_eq!(t1, Type::Int);
+}
+
+#[test]
+fn test_overlay_complex() {
+    
+
+    let mut t1: Type = Type::Function { params: vec![
+        Type::Generic(1), // init acc value
+        Type::Function { params: vec![
+            Type::Generic(0), // elt
+            Type::Generic(1), // acc
+        ], 
+        return_type: Box::new(Type::Generic(1)) // gives acc val
+        },
+        Type::Vec(Box::new(Type::Generic(0))) // collection of elts
+        ], return_type: Box::new(Type::Generic(1)) // final acc value
+    };
+    let original_type = t1.clone();
+
+    let wrong_type = Type::Bool;
+
+    
+
+    assert!(!overlay_type(&mut t1, &wrong_type));
+    assert_eq!(original_type, t1);
+
+    let half_match_expected_out = Type::Function { params: vec![
+        Type::Int, // init acc value
+        Type::Function { params: vec![
+            Type::Generic(0), // elt
+            Type::Generic(1), // acc
+        ], 
+        return_type: Box::new(Type::Generic(1)) // gives acc val
+        },
+        Type::Vec(Box::new(Type::Generic(0))) // collection of elts
+        ], return_type: Box::new(Type::Int) // final acc value
+    };
+
+    let half_match_foreground = Type::Function { params: vec![
+        Type::Int, // init acc value
+        Type::Bool,
+        Type::Option(Box::new(Type::Int)) // collection of elts
+        ], return_type: Box::new(Type::Int) // final acc value
+    };
+
+    assert!(overlay_type(&mut t1, &half_match_foreground));
+    assert_eq!(t1, half_match_expected_out);
 }

@@ -1,6 +1,6 @@
 use super::symbols::*;
 use crate::{ast::*, info::builtins};
-use std::collections::HashMap;
+use std::{collections::{HashMap, HashSet}, ops::Add, process::Output};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemLabelDetails, Diagnostic, DiagnosticRelatedInformation,
     DiagnosticSeverity, Location, Range, Url,
@@ -112,18 +112,17 @@ pub fn check_semantics(file: &AmaroFile) -> (Vec<Diagnostic>, HashMap<NodeId, Ty
                     validate_gates(&field.value, &mut diagnostics);
                 }
 
-                let mut last_generic_num: u8 = 0;
+                let mut generic_table: GenericTable = GenericTable::new();
 
                 let mut inf_data = InferenceData {
                     sym_table: &mut sym_table,
                     diagnostics: &mut diagnostics,
                     type_map: &mut type_map,
                     user_def_table: &user_def_table,
-                    last_generic_num: &mut last_generic_num
+                    generic_table: &mut generic_table
                 };
 
-                let mut field_type = infer_expr_type(&field.value, &mut inf_data);
-
+                let mut field_type = register_field(&field.value, &mut inf_data);
                 
 
                 // 3.2. Enforce types on all fields
@@ -251,21 +250,21 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
+
+#[derive(Default)]
 pub struct TypeMap {
     map: HashMap<NodeId, Type>,
-}
-
-impl Default for TypeMap {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// Stores whether or not the expression is resolved.
+    /// An expression is resolved iff its type and the types of all
+    /// subexpressions contain no generics nor unknowns.
+    /// If an expression is resolved, then we never need to infer its type ever
+    /// again.
+    resolved: HashSet<NodeId>,
 }
 
 impl TypeMap {
     pub fn new() -> TypeMap {
-        TypeMap {
-            map: HashMap::new(),
-        }
+        Self::default()
     }
     /// HashMap get for compatibility
     pub fn get(&self, id: &NodeId) -> Option<&Type> {
@@ -284,18 +283,113 @@ impl TypeMap {
     /// If a type does already exist, then attempts to just overlay the generics
     /// and unknowns, leaving the remaining structure unchanged, in an attempt
     /// to make a more specific type.
-    pub fn overlay(&mut self, id: NodeId, new_type: &Type) {
+    /// 
+    /// Note that this naively overlays generics. So, suppose the existing
+    /// type was Tuple<T1, T1> and it was overlayed with Tuple<Int, T1>. It will
+    /// not recognize that Int corresponds to T1.
+    /// 
+    /// Returns true if anything was changed, false otherwise.
+    pub fn overlay(&mut self, id: NodeId, new_type: &Type) -> bool {
         match self.map.get_mut(&id) {
             Some(prev_type) => {
-                overlay_type(prev_type, new_type);
+                overlay_type(prev_type, new_type)
             },
             None => {
                 self.set(id, new_type.clone());
+                true
+            }
+        }
+    }
+
+    pub fn is_resolved(&self, id: &NodeId) -> bool {
+        self.resolved.contains(id)
+    }
+
+    pub fn set_resolved(&mut self, id: NodeId) {
+        self.resolved.insert(id);
+    }
+}
+
+
+
+// /// Precondition: Generics already found with find_generics_in_correspondent_types
+// /// Drops Unknowns in favor of knowns, and applies generics.
+// pub fn merge_correspondent_types(t1: &Type, t2: &Type, generic_table: &GenericTable) -> Result<(), Vec<String>>
+
+
+/// Given the background_type and foreground_type are correspondent,
+/// replaces unknowns in the background type with the values from the foreground type.
+pub fn overlay_unknowns(background_type: &mut Type, foreground_type: &Type) -> bool {
+    match background_type {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Location
+        | Type::Qubit
+        | Type::QubitMap
+        | Type::Gate
+        | Type::ArchT
+        | Type::StateT
+        | Type::InstrT
+        | Type::UserDef(_) 
+        | Type::Generic(_) => false,
+        Type::Vec(b_inner) => {
+            if let Type::Vec(f_inner) = foreground_type {
+                overlay_type(b_inner, f_inner)
+            } else {
+                false
+            }
+        }
+        Type::Tuple(b_items) => {
+            if let Type::Tuple(f_items) = foreground_type {
+                b_items
+                    .iter_mut()
+                    .zip(f_items.iter())
+                    .fold(false, |acc, elt| overlay_type(elt.0, elt.1) || acc) // NOTE: order of overlay_type before acc in || is important so it is always ran
+            } else {
+                false
+            }
+        }
+        Type::Option(b_inner) => {
+            if let Type::Option(f_inner) = foreground_type {
+                overlay_type(b_inner, f_inner)
+            } else {
+                false
+            }
+        }
+        Type::Function {
+            params: b_params,
+            return_type: b_ret,
+        } => {
+            if let Type::Function {
+                params: f_params,
+                return_type: f_ret,
+            } = foreground_type
+            {
+                let res1 = overlay_type(b_ret, f_ret);
+
+                let res2 = b_params
+                    .iter_mut()
+                    .zip(f_params.iter())
+                    .fold(false, |acc, elt| overlay_type(elt.0, elt.1) || acc); // NOTE: order of overlay_type before acc in || is important so it is always ran
+                
+                res1 || res2 // have to do it like this to make sure they both get executed
+            } else {
+                false
+            }
+        }
+        
+        Type::Unknown => {
+            if !matches!(foreground_type, Type::Unknown) {
+                *background_type = foreground_type.clone();
+                true
+            } else {
+                false
             }
         }
     }
 }
-
 
 /// Overlays one type onto another.
 /// When we "overlay" a type, we are providing more specific information about
@@ -308,6 +402,11 @@ impl TypeMap {
 /// a background. Generics and unknowns are transparent pixels.
 /// 
 /// Returns true if any modification was made to the background type.
+/// 
+/// What overlay_generics does:
+/// If it is set, then if the types contain a scenario where the background type
+/// is Generic(a) and the foreground type is Generic(b), then Generic(b) will be
+/// overlayed onto Generic(a).
 pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) -> bool {
     match background_type {
         Type::Int
@@ -389,6 +488,275 @@ pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) -> bool 
     }
 }
 
+#[derive(Default)]
+pub struct FetchAndAdd<T>
+where T: Add<Output = T> + Default + From<u8> + Copy, {
+    value: T
+}
+
+impl<T> FetchAndAdd<T> where T:Add<Output = T> + Default + From<u8> + Copy {
+    pub fn new() -> Self{
+        Self::default()
+    }
+    pub fn next(&mut self) -> T {
+        let stored = self.value;
+        self.value = self.value + T::from(1u8);
+        stored
+    }
+}
+
+
+
+/// A GenericTable tracks generic-relevant information for as long as it lives.
+/// It should NOT live for the duration of the file.
+/// Rather, whenever we want to infer the type of a field's expression, we make
+/// ONE GenericTable for usage during the semantic analysis of that entire expression
+/// and all subexpressions.
+pub struct GenericTable {
+    /// The next generic number to assign to a newfound generic.
+    pub next_generic_num: FetchAndAdd<u8>,
+    /// Mappings from generic numbers to types.
+    map: HashMap<u8, Type>,
+    /// Set of generics we are currently viewing. Useful in recursive operations
+    /// to avoid infinite loops.
+    /// I can hypothesize a scenario where we might revisit the same generic and 
+    /// it is not an infinite loop, but I'm not sure if it is is feasible in Amaro.
+    viewing_set: HashSet<u8>,
+
+    /// Set by this whenever the generic map updates.
+    /// Can be reset by the user.
+    dirty_flag: bool
+}
+
+impl GenericTable {
+    pub fn new() -> Self {
+        Self { next_generic_num: FetchAndAdd::new(), map: HashMap::new(), viewing_set: HashSet::new(), dirty_flag: false }
+    }
+
+    pub fn reset_dirty_flag(&mut self) {
+        self.dirty_flag = false;
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty_flag
+    }
+
+    pub fn next_generic(&mut self) -> u8 {
+        self.next_generic_num.next()
+    }
+
+    /// Assigns a type to a generic number.
+    /// Gives Ok if the generic number did not have an assigned type, or if we
+    /// are trying to assign the same type to the generic number.
+    /// Errors if we try to overwrite a different type, or also errors if we
+    /// try to assign a generic type.
+    /// Unknown types are not assigned and are just ignored with an Ok.
+    pub fn assign(&mut self, generic_num: u8, typ: Type) -> Result<(), Type> {
+        if let Type::Generic(c) = typ && c <= generic_num {
+            return Err(typ);
+        }
+        if matches!(typ, Type::Unknown) {
+            return Ok(())
+        }
+        match self.map.get(&generic_num).map(|elt| elt.clone()) {
+            Some(existing_type) => {
+                // need to check if types can be overlayed or something?
+                if self.viewing_set.contains(&generic_num) {
+                    Err(existing_type)
+                } else if existing_type != typ {
+                    self.viewing_set.insert(generic_num);
+                    // TODO in here, we want to do some mashing
+                    match self.find_generics_in_correspondent_types(&existing_type, &typ) {
+                        Ok(_) => {
+                            self.viewing_set.remove(&generic_num);
+                            Ok(())
+                        },
+                        Err(_) => {
+                            self.viewing_set.remove(&generic_num);
+                            Err(existing_type)
+                        }
+                        
+                    }
+                } else {
+                    Ok(())
+                }
+            },
+            None => {
+                self.map.insert(generic_num, typ);
+                self.dirty_flag = true;
+                Ok(())
+            }
+        }
+    }
+
+    /// Gets the type referred to by the generic.
+    pub fn get(&self, generic_num: &u8) -> Option<&Type> {
+        self.map.get(generic_num)
+    }
+
+
+
+    /// Replaces generic types with their assigned values
+    pub fn try_degenerisize(&self, t1: &Type) -> Type {
+        match t1 {
+            Type::Generic(a) => {
+                match self.get(a) {
+                    Some(t) => t.clone(),
+                    None => t1.clone() // no change
+                }
+            },
+            Type::Int |
+            Type::Float |
+            Type::Bool |
+            Type::String |
+            Type::Location |
+            Type::Qubit |
+            Type::QubitMap |
+            Type::Gate |
+            Type::ArchT |
+            Type::StateT |
+            Type::InstrT |
+            Type::UserDef(_) |
+            Type::Unknown => t1.clone(),
+            Type::Vec(inner) => Type::Vec(Box::new(self.try_degenerisize(inner))),
+            Type::Tuple(items) => Type::Tuple(items.iter().map(|f| self.try_degenerisize(f)).collect()),
+            Type::Option(inner) => Type::Option(Box::new(self.try_degenerisize(inner))),
+            Type::Function { params, return_type } => Type::Function { params: params.iter().map(|f| self.try_degenerisize(f)).collect(), return_type: Box::new(self.try_degenerisize(return_type)) },
+        }
+    }
+
+    /// Tightens up the table, meaning resolves generics that reference other
+    /// generics.
+    pub fn tighten_up(&mut self) -> bool {
+        self.viewing_set = HashSet::new();
+        let assignments_vec: Vec<(u8, Type)> = self.map.iter().map(|pair| (*pair.0, pair.1.clone())).collect();
+        for pair in assignments_vec {
+            if !self.viewing_set.insert(pair.0) {
+                self.viewing_set = HashSet::new();
+                return false; // infinite loop, backing out.
+            }
+            let new_type = self.try_degenerisize(&pair.1);
+            if new_type != pair.1 {
+                self.map.insert(pair.0, new_type);
+                self.dirty_flag = true;
+            }
+        }
+
+        true
+    }
+
+    /// Two types are called "correspondent" if they are supposed to correspond to
+    /// the same thing. Notice that sometimes correspondent types might be disequal
+    /// due to generics and unknowns.
+    /// 
+    /// Identifies the generics.
+    /// 
+    /// Errors are emitted in the string vec if the types have some inherent incompatability.
+    pub fn find_generics_in_correspondent_types(&mut self, t1: &Type, t2: &Type) -> Result<(), Vec<String>>{
+        match (t1,t2) {
+            // both are generic
+            (Type::Generic(a), Type::Generic(b)) => {
+                // if they're different types, we can make an association btwn them
+                // higher to lower
+                if a != b {
+                    let smaller = *a.min(b);
+                    let larger = *a.max(b);
+                    self.assign(smaller, Type::Generic(larger)).map_err(|elt| vec![format!("Tried to assign type {} to generic {} when already had {}.", Type::Generic(*a.max(b)), Type::Generic(*a.min(b)), elt)])
+                } else {
+                    Ok(())
+                }
+            },
+            // first is generic
+            (Type::Generic(a), _) => {
+                // then, assign t2 onto generic a
+                self.assign(*a, t2.clone()).map_err(|elt| vec![format!("Tried to assign type {} to generic {} when already had {}.", t2, t1, elt)])
+            },
+            // second is generic
+            (_, Type::Generic(a)) => {
+                // then, assign t2 onto generic a
+                self.assign(*a, t1.clone()).map_err(|elt| vec![format!("Tried to assign type {} to generic {} when already had {}.", t1, t2, elt)])
+            },
+            // first is unknown
+            (Type::Unknown, _) => {
+                Ok(())
+            },
+            // second is unknown
+            (_, Type::Unknown) => {
+                Ok(())
+            },
+            (Type::Vec(a_inner), Type::Vec(b_inner)) => {
+                self.find_generics_in_correspondent_types(a_inner, b_inner)
+            },
+            (Type::Option(a_inner), Type::Option(b_inner)) => {
+                self.find_generics_in_correspondent_types(a_inner, b_inner)
+            },
+            (Type::Tuple(a_items), Type::Tuple(b_items)) => {
+
+                let mut issues: Option<Vec<String>> = None;
+                if a_items.len() != b_items.len() {
+                    let issue_message = format!("Tuples don't have matching size: {} and {}", a_items.len(), b_items.len());
+                    match issues.as_mut() {
+                        None => issues = Some(vec![issue_message]),
+                        Some(vec) => vec.push(issue_message),
+                    }
+                }
+                a_items.iter().zip(b_items.iter()).for_each(|pair| {
+                    if let Err(elt) = self.find_generics_in_correspondent_types(pair.0, pair.1) {
+                        match issues.as_mut() {
+                            None => issues = Some(elt),
+                            Some(vec) => vec.extend(elt),
+                        }
+                    }
+                });
+                match issues {
+                    None => Ok(()),
+                    Some(vec) => Err(vec)
+                }
+            },
+            (Type::Function { params: a_params, return_type: a_return_type }, Type::Function { params: b_params, return_type: b_return_type }) => {
+
+                let mut issues: Option<Vec<String>> = None;
+                if a_params.len() != b_params.len() {
+                    let issue_message = format!("Tuples don't have matching size: {} and {}", a_params.len(), b_params.len());
+                    match issues.as_mut() {
+                        None => issues = Some(vec![issue_message]),
+                        Some(vec) => vec.push(issue_message),
+                    }
+                }
+                a_params.iter().zip(b_params.iter()).for_each(|pair| {
+                    if let Err(elt) = self.find_generics_in_correspondent_types(pair.0, pair.1) {
+                        match issues.as_mut() {
+                            None => issues = Some(elt),
+                            Some(vec) => vec.extend(elt),
+                        }
+                    }
+                });
+
+                if let Err(elt) = self.find_generics_in_correspondent_types(a_return_type, b_return_type) {
+                    match issues.as_mut() {
+                        None => issues = Some(elt),
+                        Some(vec) => vec.extend(elt),
+                    }
+                }
+                
+
+                match issues {
+                    None => Ok(()),
+                    Some(vec) => Err(vec)
+                }
+            }
+            _ => {
+                if *t1 != *t2 {
+                    Err(vec![format!("Cannot find generic types in {} and {}, types don't match.", *t1, *t2)])
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+}
+
 
 
 /// Aggregate of the args passed to infer_expr_type,
@@ -398,7 +766,198 @@ pub struct InferenceData<'a> {
     pub diagnostics: &'a mut Vec<Diagnostic>,
     pub type_map: &'a mut TypeMap,
     pub user_def_table: &'a UserDefTable,
-    pub last_generic_num: &'a mut u8,
+    pub generic_table: &'a mut GenericTable,
+}
+
+/// Precondition: Expr and all subexpressions have a type (even if unknown) in
+/// the type map.
+/// Recursively descends into the expression, replacing generic types wherever
+/// found.
+pub fn apply_generic_info(expr: &Expr, inference_data: &mut InferenceData) {
+    eprintln!("  {} ({})", expr.kind, expr.id.0);
+    let original_type = inference_data.type_map.get(&expr.id).unwrap();
+    let new_type = inference_data.generic_table.try_degenerisize(original_type);
+    inference_data.type_map.set(expr.id, new_type); // fine to do set instead of overlay,
+    // because set is less expensive and the outcome will be the same
+
+    // now, recursively descend.
+    match &expr.kind {
+        ExprKind::Identifier(_) |
+        ExprKind::IntLiteral(_) |
+        ExprKind::FloatLiteral(_) |
+        ExprKind::StringLiteral(_) | 
+        ExprKind::BoolLiteral(_) => {
+            // terminals, do nothing
+        },
+        ExprKind::List(exprs) => exprs.iter().for_each(|elt| apply_generic_info(elt, inference_data)),
+        ExprKind::Tuple(exprs) => exprs.iter().for_each(|elt| apply_generic_info(elt, inference_data)),
+        ExprKind::StructLiteral { name, fields } => fields.iter().for_each(|elt| apply_generic_info(&elt.1, inference_data)),
+        ExprKind::FunctionCall { function, args } => {
+            apply_generic_info(function, inference_data);
+            args.iter().for_each(|elt| apply_generic_info(elt, inference_data));
+        },
+        ExprKind::FieldAccess { object, field } => apply_generic_info(object, inference_data),
+        ExprKind::IndexAccess { object, index } => {
+            apply_generic_info(object, inference_data);
+            apply_generic_info(index, inference_data);
+        },
+        ExprKind::Lambda { params, body } => {
+            apply_generic_info(body, inference_data);
+        },
+        ExprKind::IfThenElse { condition, then_branch, else_branch } => {
+            apply_generic_info(condition, inference_data);
+            apply_generic_info(then_branch, inference_data);
+            apply_generic_info(else_branch, inference_data);
+        },
+        ExprKind::LetBinding { name, value, body } => {
+            apply_generic_info(value, inference_data);
+            apply_generic_info(body, inference_data);
+        },
+        ExprKind::BinaryOp { op, left, right } => {
+            apply_generic_info(left, inference_data);
+            apply_generic_info(right, inference_data);
+        },
+        ExprKind::UnaryOp { op, operand } => {
+            apply_generic_info(operand, inference_data);
+        },
+        ExprKind::Some(expr) => apply_generic_info(expr, inference_data),
+        ExprKind::None => {
+
+        },
+        ExprKind::Match { scrutinee, arms } => {
+            apply_generic_info(scrutinee, inference_data);
+            arms.iter().for_each(|elt| {
+                apply_generic_info(&elt.body, inference_data);
+            });
+        },
+        ExprKind::TensorProduct { left, right } => {
+            apply_generic_info(left, inference_data);
+            apply_generic_info(right, inference_data);
+        },
+        ExprKind::Projection { index, tuple } => {
+            apply_generic_info(tuple, inference_data);
+        },
+    }
+
+}
+
+
+/// Given a field, registers all its info. Recursively and repeatedly does type
+/// inference until there is nothing else to gather.
+/// 
+/// This is needed because generics mean we might have to traverse the same parts
+/// multiple times.
+pub fn register_field(field: &Expr, inference_data: &mut InferenceData) -> Type {
+    inference_data.generic_table.reset_dirty_flag();
+    // first, infer
+    infer_expr_type(field, inference_data);
+
+    let mut num_loops = 0;
+
+    while inference_data.generic_table.is_dirty() {
+        if num_loops > 30 {
+            // very likely something has gone horribly wrong.
+            // this should never happen, but it's good to have this here anyway.
+            inference_data.diagnostics.push(Diagnostic { 
+                range: field.range, 
+                severity: Some(DiagnosticSeverity::ERROR), 
+                message: "Parsing this field resulted in an infinite loop due to generics resolution.".to_string(),
+                ..Default::default() 
+            });
+            break;
+        }
+        inference_data.generic_table.reset_dirty_flag();
+        // make table nicer, meaning deals with generics that reference others
+        inference_data.generic_table.tighten_up(); 
+
+        eprintln!("Field at {:?} has {} lacking", field.range, lacking_vec.len());
+        lacking_vec.iter().for_each(|elt| eprintln!("Expr {} at {:?} lacking", elt.kind, elt.range));
+
+        // go through and apply generics
+        eprintln!("Applying generic info");
+        apply_generic_info(field, inference_data);
+        // then, try again with inference
+        eprintln!("Inferring expression type");
+        infer_expr_type(field, inference_data);
+        num_loops += 1;
+
+        
+    }
+    // eventually, the generic table should stop being dirty. if not, then we
+    // are always making progress to removing generics.
+    inference_data.type_map.get(&field.id).unwrap().clone() // always present
+}
+
+
+/// Delete this later. Useful for testing.
+/// Populates the vec with expressions that DONT have values in the type map
+pub fn temp_verify_all_expr_have_values<'a>(expr: &'a Expr, vec: &mut Vec<&'a Expr>, inference_data: &InferenceData) {
+    eprintln!("  {} ({})", expr.kind, expr.id.0);
+    
+    if let None = inference_data.type_map.get(&expr.id) {
+        vec.push(expr);
+    }
+
+    match &expr.kind {
+        ExprKind::Identifier(_) |
+        ExprKind::IntLiteral(_) |
+        ExprKind::FloatLiteral(_) |
+        ExprKind::StringLiteral(_) |
+        ExprKind::BoolLiteral(_) => {
+            // terminals
+        },
+        ExprKind::List(exprs) => exprs.iter().for_each(|elt| temp_verify_all_expr_have_values(elt, vec, inference_data)),
+        ExprKind::Tuple(exprs) => exprs.iter().for_each(|elt| temp_verify_all_expr_have_values(elt, vec, inference_data)),
+        ExprKind::StructLiteral { name, fields } => fields.iter().for_each(|elt| temp_verify_all_expr_have_values(&elt.1, vec, inference_data)),
+        ExprKind::FunctionCall { function, args } => {
+            temp_verify_all_expr_have_values(function, vec, inference_data);
+            args.iter().for_each(|elt| temp_verify_all_expr_have_values(elt, vec, inference_data))
+        },
+        ExprKind::FieldAccess { object, field } => {
+            temp_verify_all_expr_have_values(object, vec, inference_data);
+        },
+        ExprKind::IndexAccess { object, index } => {
+            temp_verify_all_expr_have_values(object, vec, inference_data);
+            temp_verify_all_expr_have_values(index, vec, inference_data);
+        },
+        ExprKind::Lambda { params, body } => {
+            temp_verify_all_expr_have_values(body, vec, inference_data);
+        },
+        ExprKind::IfThenElse { condition, then_branch, else_branch } => {
+            temp_verify_all_expr_have_values(condition, vec, inference_data);
+            temp_verify_all_expr_have_values(then_branch, vec, inference_data);
+            temp_verify_all_expr_have_values(else_branch, vec, inference_data);
+        },
+        ExprKind::LetBinding { name, value, body } => {
+            temp_verify_all_expr_have_values(value, vec, inference_data);
+            temp_verify_all_expr_have_values(body, vec, inference_data);
+        },
+        ExprKind::BinaryOp { op, left, right } => {
+            temp_verify_all_expr_have_values(left, vec, inference_data);
+            temp_verify_all_expr_have_values(right, vec, inference_data);
+        },
+        ExprKind::UnaryOp { op, operand } => {
+            temp_verify_all_expr_have_values(operand, vec, inference_data);
+        },
+        ExprKind::Some(expr) => {
+            temp_verify_all_expr_have_values(expr, vec, inference_data);
+        },
+        ExprKind::None => {
+
+        },
+        ExprKind::Match { scrutinee, arms } => {
+            temp_verify_all_expr_have_values(scrutinee, vec, inference_data);
+            arms.iter().for_each(|elt| temp_verify_all_expr_have_values(&elt.body, vec, inference_data))
+        },
+        ExprKind::TensorProduct { left, right } => {
+            temp_verify_all_expr_have_values(left, vec, inference_data);
+            temp_verify_all_expr_have_values(right, vec, inference_data);
+        },
+        ExprKind::Projection { index, tuple } => {
+            temp_verify_all_expr_have_values(tuple, vec, inference_data);
+        },
+    }
+
 }
 
 /// Infers the type of an expression using the current symbol table.
@@ -407,17 +966,26 @@ pub struct InferenceData<'a> {
 /// Uses `Unknown` for leniency to avoid false positives.
 pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type {
     // generics can only be introduced through built-ins.
+    eprintln!("  {} ({})", expr.kind, expr.id.0);
 
+    // first, check if already resolved.
+    if inference_data.type_map.is_resolved(&expr.id) {
+        return inference_data.type_map.get(&expr.id).unwrap().clone()
+    }
 
-    let found_type = match &expr.kind {
-        ExprKind::IntLiteral(_) => Type::Int,
-        ExprKind::FloatLiteral(_) => Type::Float,
-        ExprKind::BoolLiteral(_) => Type::Bool,
-        ExprKind::StringLiteral(_) => Type::String,
-        ExprKind::None => Type::Option(Box::new(Type::Generic(0))), // TODO test this bhvr
+    // otherwise, need to resolve it
+
+    let (found_type, resolved) : (Type, bool) = match &expr.kind {
+        ExprKind::IntLiteral(_) => (Type::Int, true),
+        ExprKind::FloatLiteral(_) => (Type::Float, true),
+        ExprKind::BoolLiteral(_) => (Type::Bool, true),
+        ExprKind::StringLiteral(_) => (Type::String, true),
+        ExprKind::None => {
+            (Type::Option(Box::new(Type::Generic(inference_data.generic_table.next_generic()))), false)
+        }, // TODO test this bhvr
         ExprKind::Identifier(name) => {
             // always first look up in symbol table
-            inference_data
+            let resultant_type = inference_data
                 .sym_table
                 .lookup(name)
                 .cloned()
@@ -436,7 +1004,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                                 .map(|elt| {
                                     // shift the generics so they are unique
                                     let mut new_type = elt.typ.clone();
-                                    builtins::make_generics_unique(&mut new_type, inference_data.last_generic_num);
+                                    builtins::make_generics_unique(&mut new_type, &mut inference_data.generic_table.next_generic_num);
                                     new_type
                                 })
                                 .unwrap_or_else(|| {
@@ -454,39 +1022,60 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                                     }
                                 })
                         })
-                })
+                });
+
+            let resolved = !resultant_type.contains_generic_or_unknown();
+            (resultant_type, resolved)
         }
         ExprKind::List(items) => {
             if items.is_empty() {
-                let cur_generic = *inference_data.last_generic_num;
-                *inference_data.last_generic_num += 1;
-                Type::Vec(Box::new(Type::Generic(cur_generic)))
+                (Type::Vec(Box::new(Type::Generic(inference_data.generic_table.next_generic()))), false)
             } else {
                 let first_type = infer_expr_type(&items[0], inference_data);
-                for item in &items[1..] {
+                let problems: Vec<(Range, Type)> = items[1..].iter().filter_map(|item| {
                     let item_type = infer_expr_type(item, inference_data);
+
                     if item_type != first_type {
-                        inference_data.diagnostics.push(Diagnostic {
-                            range: item.range,
-                            severity: Some(DiagnosticSeverity::ERROR),
-                            message: "Inconsistent types in list literal.".to_string(),
-                            ..Default::default()
-                        });
-                        return Type::Vec(Box::new(Type::Unknown));
+                        Some((item.range, item_type))
+                    } else {
+                        None
                     }
+                }).collect();
+                
+                
+                problems.iter().for_each(|elt| {
+                    inference_data.diagnostics.push(Diagnostic {
+                        range: elt.0,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        message: format!("Inconsistent types in list literal. Had {}", elt.1),
+                        ..Default::default()
+                    });
+                });
+
+                if !problems.is_empty() {
+                    
+                    (Type::Vec(Box::new(Type::Unknown)), false)
+                } else {
+
+                
+
+                    (Type::Vec(Box::new(first_type)), inference_data.type_map.is_resolved(&items[0].id))
                 }
-                Type::Vec(Box::new(first_type))
             }
         }
-        ExprKind::Tuple(items) => Type::Tuple(
-            items
+        ExprKind::Tuple(items) => {
+            let new_inner_type = Type::Tuple(items
                 .iter()
                 .map(|e| infer_expr_type(e, inference_data))
-                .collect(),
-        ),
+                .collect());
+
+            let resolved = items.iter().all(|elt| inference_data.type_map.is_resolved(&elt.id));
+            (new_inner_type, resolved)
+        },
         ExprKind::Some(inner) => {
             let inner_type = infer_expr_type(inner, inference_data);
-            Type::Option(Box::new(inner_type))
+            let inner_resolved = inference_data.type_map.is_resolved(&inner.id);
+            (Type::Option(Box::new(inner_type)), inner_resolved)
         }
         ExprKind::Lambda { params, body } => {
             // with lambda:
@@ -494,14 +1083,16 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             // if we do, then we provide some information about the lambda and use this
             // to gain additional information about the lambda.
 
-            // LS TODO: Repeat code. Make it cleaner
+            inference_data.sym_table.enter_scope();
+            let mut param_types = Vec::new();
+
+            let mut resolved: bool;
+
             if let Some(Type::Function {
                 params: fcn_params, ..
             }) = inference_data.type_map.get(&expr.id)
             {
-                inference_data.sym_table.enter_scope();
-
-                let mut param_types = Vec::new();
+                // If a type exists, use this.
                 for (param_name, param_type) in params.iter().zip(fcn_params) {
                     inference_data
                         .sym_table
@@ -509,29 +1100,31 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     param_types.push(param_type.clone());
                 }
 
-                let found_return_type = infer_expr_type(body, inference_data);
-                inference_data.sym_table.exit_scope();
+                // resolved is true if each param does not contain generics and does not contain unknowns.
+                resolved = fcn_params.iter().all(|elt| !elt.contains_generic_or_unknown());
 
-                Type::Function {
-                    params: param_types,
-                    return_type: Box::new(found_return_type),
-                }
+                
+
+
             } else {
-                // do the normal way if no mapping exists (or if mapping is bizarre)
-                inference_data.sym_table.enter_scope();
-                let mut param_types = Vec::new();
+                // If no type exists, then we just put unknown for all of them.
                 for param in params {
                     inference_data.sym_table.bind(param.clone(), Type::Unknown);
                     param_types.push(Type::Unknown);
                 }
-                let return_type = infer_expr_type(body, inference_data);
-                inference_data.sym_table.exit_scope();
 
-                Type::Function {
+                resolved = params.is_empty(); // only can be resolved if there
+                // are no params, cus all params default to unknown here
+            }
+
+            let return_type = infer_expr_type(body, inference_data);
+            resolved &= inference_data.type_map.is_resolved(&body.id);
+            inference_data.sym_table.exit_scope();
+
+            (Type::Function {
                     params: param_types,
                     return_type: Box::new(return_type),
-                }
-            }
+                }, resolved)
         }
         ExprKind::LetBinding { name, value, body } => {
             inference_data.sym_table.enter_scope();
@@ -539,7 +1132,9 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             inference_data.sym_table.bind(name.clone(), value_type);
             let body_type = infer_expr_type(body, inference_data);
             inference_data.sym_table.exit_scope();
-            body_type
+
+            let resolved = inference_data.type_map.is_resolved(&value.id) && inference_data.type_map.is_resolved(&body.id);
+            (body_type, resolved)
         }
         ExprKind::IfThenElse {
             condition,
@@ -587,14 +1182,21 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         ..Default::default()
                     });
                 }
-                then_type
+                let resolved = inference_data.type_map.is_resolved(&condition.id) && inference_data.type_map.is_resolved(&then_branch.id) && inference_data.type_map.is_resolved(&else_branch.id);
+                (then_type, resolved)
             }
         }
         ExprKind::FunctionCall { function, args } => {
-            infer_expr_type(function, inference_data);
-            let fcn_type = (*inference_data.type_map.get(&function.id).as_ref().unwrap()).clone(); // always there
+            let fcn_type = infer_expr_type(function, inference_data);
+            
+
             match &fcn_type {
-                Type::Unknown => Type::Unknown,
+                Type::Unknown => {
+                    args.iter().for_each(|elt| {
+                        infer_expr_type(elt, inference_data);
+                    }); // still need to do this to assign them to something
+                    (Type::Unknown, false)
+                },
                 Type::Function {
                     params,
                     return_type,
@@ -610,8 +1212,11 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             ),
                             ..Default::default()
                         });
-                        (**return_type).clone()
-                    } else if contains_generic(&fcn_type) {
+                        args.iter().for_each(|elt| {
+                            infer_expr_type(elt, inference_data);
+                        }); // still need to do this to assign them to something
+                        ((**return_type).clone(), false)
+                    } else if fcn_type.contains_generic() {
                         // need to do some generic stuff
 
                         // 1. get inferred types of all args and return type
@@ -621,16 +1226,21 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
 
                         // TODOGEN
 
-                        let mut generic_map = HashMap::new();
-                        let inferred_args: Vec<Type> = args
+                        let mut inferred_args: Vec<(&Expr, Type)> = args
                             .iter()
-                            .map(|elt| infer_expr_type(elt, inference_data))
+                            .map(|elt| (elt,infer_expr_type(elt, inference_data)))
                             .collect();
                         let outcome = inferred_args
-                            .iter()
+                            .iter_mut()
                             .zip(params)
                             .map(|(actual_arg, generic_param)| {
-                                infer_generic_type(generic_param, actual_arg, &mut generic_map)
+                                // overlay the unknowns
+                                if overlay_unknowns(&mut actual_arg.1, generic_param) {
+                                    retype(actual_arg.0, actual_arg.1.clone(), inference_data);
+                                }
+                                
+                                inference_data.generic_table.find_generics_in_correspondent_types(generic_param, &actual_arg.1)
+                                // infer_generic_type(generic_param, actual_arg, &mut generic_map)
                             })
                             .collect::<Result<Vec<_>, _>>();
 
@@ -648,28 +1258,30 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             // });
                             inference_data.type_map.overlay(expr.id, &Type::Unknown);
                             return Type::Unknown;
-                        }
-
-                        if generic_map.is_empty() {
-                            // cannot resolve any more generics
-                            // end normally
-                            (**return_type).clone()
                         } else {
-                            // degenerisize now
-                            for (param_type, arg) in params.iter().zip(args) {
-                                let (_, t) = degenerisize(param_type, &generic_map);
-                                retype(arg, t, inference_data);
-                            }
-
-                            // degenerisize whole function
-                            let (_, t) = degenerisize(&fcn_type, &generic_map);
-                            retype(function, t.clone(), inference_data);
-
-                            // then, infer again on this expr to see if we're done
-                            // should be slowly removing generic types i think
-
-                            return infer_expr_type(expr, inference_data);
+                            ((**return_type).clone(), false)
                         }
+
+                        // if generic_map.is_empty() {
+                        //     // cannot resolve any more generics
+                        //     // end normally
+                        //     (**return_type).clone()
+                        // } else {
+                        //     // degenerisize now
+                        //     for (param_type, arg) in params.iter().zip(args) {
+                        //         let (_, t) = degenerisize(param_type, &generic_map);
+                        //         retype(arg, t, inference_data);
+                        //     }
+
+                        //     // degenerisize whole function
+                        //     let (_, t) = degenerisize(&fcn_type, &generic_map);
+                        //     retype(function, t.clone(), inference_data);
+
+                        //     // then, infer again on this expr to see if we're done
+                        //     // should be slowly removing generic types i think
+
+                        //     return infer_expr_type(expr, inference_data);
+                        // }
                     } else {
                         for (i, (param_type, arg)) in params.iter().zip(args).enumerate() {
                             let arg_type = infer_expr_type(arg, inference_data);
@@ -705,10 +1317,17 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             }
                         }
 
-                        (**return_type).clone()
+
+                        let resolved = inference_data.type_map.is_resolved(&function.id) && args.iter().all(|elt| inference_data.type_map.is_resolved(&elt.id));
+                        // TODO check that just bc smth doesnt have generics, doesnt mean
+                        // it's fine. could have unknowns
+                        ((**return_type).clone(), resolved)
                     }
                 }
                 _ => {
+                    args.iter().for_each(|elt| {
+                        infer_expr_type(elt, inference_data);
+                    }); // still need to do this to assign them to something
                     inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,
                         severity: Some(DiagnosticSeverity::ERROR),
@@ -716,7 +1335,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
 
                         ..Default::default()
                     });
-                    Type::Unknown
+                    (Type::Unknown, false)
                 }
             }
         }
@@ -724,7 +1343,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             let obj_type = infer_expr_type(object, inference_data);
 
             if matches!(obj_type, Type::Unknown) {
-                Type::Unknown
+                (Type::Unknown, false)
             } else {
                 let type_from_user_def: Option<&Type> = if let Type::UserDef(name) = &obj_type {
                     if let Some(fields) = inference_data.user_def_table.get_fields(name.as_str()) {
@@ -736,7 +1355,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     None
                 };
 
-                match type_from_user_def {
+                let outcome_type = match type_from_user_def {
                     Some(t) => t.clone(),
                     // TODOGEN
                     None => match builtins::check_built_in_after_type(&obj_type, field) {
@@ -755,10 +1374,13 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             Type::Unknown
                         }
                     },
-                }
+                };
+
+                let resolved = inference_data.type_map.is_resolved(&object.id) && !outcome_type.contains_generic_or_unknown();
+
+                (outcome_type, resolved)
             }
         }
-
         ExprKind::StructLiteral { name, fields } => {
             // the only valid struct literals are those of UserDef, right?
             // im going to go with that
@@ -768,7 +1390,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             }
 
             if inference_data.user_def_table.get_fields(name).is_some() {
-                Type::UserDef(name.clone())
+                (Type::UserDef(name.clone()), true)
             } else {
                 inference_data.diagnostics.push(Diagnostic {
                     range: expr.range,
@@ -777,7 +1399,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         .to_string(),
                     ..Default::default()
                 });
-                Type::Unknown
+                (Type::Unknown, false)
             }
         }
         ExprKind::IndexAccess { object, index } => {
@@ -787,8 +1409,8 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             // Skip validation for Unknown types to avoid false positives.
             // Example: x.implementation.(path()) where x is Unknown.
             if obj_type == Type::Unknown {
-                return Type::Unknown;
-            }
+                (Type::Unknown, false)
+            } else {
 
             let expected_idx_type = match &obj_type {
                 Type::Vec(_) => Type::Int,
@@ -825,7 +1447,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 other => other,
             };
 
-            match actual_type {
+            let output_type = match actual_type {
                 Type::Vec(inner) => *inner,
                 Type::QubitMap => Type::Location,
                 Type::Unknown => Type::Unknown,
@@ -838,7 +1460,12 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     });
                     Type::Unknown
                 }
-            }
+            };
+
+            let resolved = inference_data.type_map.is_resolved(&object.id) && inference_data.type_map.is_resolved(&index.id) && !output_type.contains_generic_or_unknown();
+
+            (output_type, resolved)
+        }
         }
         ExprKind::BinaryOp { op, left, right } => {
             let left_type = infer_expr_type(left, inference_data);
@@ -850,7 +1477,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 | BinaryOperator::Mul
                 | BinaryOperator::Div
                 | BinaryOperator::Mod => match types_math(&left_type, &right_type) {
-                    Some(t) => t,
+                    Some(t) => (t, true),
                     None => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -861,14 +1488,14 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             ),
                             ..Default::default()
                         });
-                        Type::Unknown
+                        (Type::Unknown, false)
                     }
                 },
                 BinaryOperator::Ge
                 | BinaryOperator::Le
                 | BinaryOperator::Gt
                 | BinaryOperator::Lt => match types_math(&left_type, &right_type) {
-                    Some(_) => Type::Bool,
+                    Some(_) => (Type::Bool, true),
                     None => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -879,12 +1506,12 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             ),
                             ..Default::default()
                         });
-                        Type::Unknown
+                        (Type::Unknown, false)
                     }
                 },
                 BinaryOperator::Eq | BinaryOperator::Ne => {
                     match types_comparable(&left_type, &right_type) {
-                        true => Type::Bool,
+                        true => (Type::Bool, true),
                         false => {
                             inference_data.diagnostics.push(Diagnostic {
                                 range: expr.range,
@@ -895,13 +1522,13 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                                 ),
                                 ..Default::default()
                             });
-                            Type::Unknown
+                            (Type::Unknown, false)
                         }
                     }
                 }
 
                 BinaryOperator::And | BinaryOperator::Or => match (&left_type, &right_type) {
-                    (Type::Unknown | Type::Bool, Type::Bool | Type::Unknown) => Type::Bool,
+                    (Type::Unknown | Type::Bool, Type::Bool | Type::Unknown) => (Type::Bool, true),
                     (_, _) => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -912,20 +1539,24 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             ),
                             ..Default::default()
                         });
-                        Type::Unknown
+                        (Type::Unknown, false)
                     }
                 },
 
-                BinaryOperator::Tensor => Type::Unknown,
-                BinaryOperator::Range => Type::Unknown,
+                BinaryOperator::Tensor => (Type::Unknown, false),
+                BinaryOperator::Range => if matches!(left_type, Type::Int) && matches!(right_type, Type::Int) {
+                    (Type::Vec(Box::new(Type::Int)), true)
+                } else {
+                    (Type::Unknown, false)
+                },
             }
         }
         ExprKind::UnaryOp { op, operand } => {
             let operand_type = infer_expr_type(operand, inference_data);
             match op {
                 UnaryOperator::Not => match operand_type {
-                    Type::Bool => Type::Bool,
-                    Type::Unknown => Type::Unknown,
+                    Type::Bool => (Type::Bool, true),
+                    Type::Unknown => (Type::Unknown, false),
                     _ => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -933,13 +1564,13 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             message: "Cannot perform NOT operation on non-bool type.".to_string(),
                             ..Default::default()
                         });
-                        Type::Unknown
+                        (Type::Unknown, false)
                     }
                 },
                 UnaryOperator::Neg => match operand_type {
-                    Type::Int => Type::Int,
-                    Type::Float => Type::Float,
-                    Type::Unknown => Type::Unknown,
+                    Type::Int => (Type::Int, true),
+                    Type::Float => (Type::Float, true),
+                    Type::Unknown => (Type::Unknown, false),
                     _ => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -947,18 +1578,18 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                             message: "Cannot perform NEG operation on non-number type.".to_string(),
                             ..Default::default()
                         });
-                        Type::Unknown
+                        (Type::Unknown, false)
                     }
                 },
             }
         }
-        ExprKind::TensorProduct { .. } => Type::Unknown, // TODO what to do here?
+        ExprKind::TensorProduct { .. } => (Type::Unknown, false), // TODO what to do here?
         ExprKind::Match { scrutinee, arms } => {
             let _scrutinee_type = infer_expr_type(scrutinee, inference_data);
 
             if arms.is_empty() {
-                return Type::Unknown;
-            }
+                (Type::Unknown, false)
+            } else {
 
             let first_type = infer_expr_type(&arms[0].body, inference_data);
             for arm in &arms[1..] {
@@ -980,14 +1611,17 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 }
             }
 
-            first_type
+            let resolved = inference_data.type_map.is_resolved(&scrutinee.id) && arms.iter().all(|elt| inference_data.type_map.is_resolved(&elt.body.id));
+
+            (first_type, resolved)
+        }
         }
         ExprKind::Projection { index, tuple } => {
             // first, get type of the tuple
             let tuple_type = infer_expr_type(tuple, inference_data);
             match tuple_type {
                 Type::Tuple(types) => match types.get(*index) {
-                    Some(found_type) => found_type.clone(),
+                    Some(found_type) => (found_type.clone(), inference_data.type_map.is_resolved(&tuple.id)),
                     None => {
                         inference_data.diagnostics.push(Diagnostic {
                             range: expr.range,
@@ -997,10 +1631,10 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                                 .to_string(),
                             ..Default::default()
                         });
-                        Type::Unknown
+                        (Type::Unknown, false)
                     }
                 },
-                Type::Unknown => Type::Unknown,
+                Type::Unknown => (Type::Unknown, false),
                 _ => {
                     inference_data.diagnostics.push(Diagnostic {
                         range: expr.range,
@@ -1009,14 +1643,24 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         message: format!("Cannot perform projection on type {}", tuple_type),
                         ..Default::default()
                     });
-                    Type::Unknown
+                    (Type::Unknown, false)
                 }
             }
         }
     };
-    inference_data.type_map.overlay(expr.id, &found_type);
+    
+    
+    // TODO: compare found type and original type to get generic types
+    // TODO: then, now that we have generic types, go through and 
 
-    found_type
+
+    inference_data.type_map.overlay(expr.id, &found_type);
+    if resolved {
+        inference_data.type_map.set_resolved(expr.id);
+    }
+
+
+    inference_data.type_map.get(&expr.id).unwrap().clone()
 }
 
 /// Formats a Type for display in user-facing diagnostic messages.
@@ -1058,6 +1702,8 @@ fn types_math(t1: &Type, t2: &Type) -> Option<Type> {
         // op if the other type is an int, or just if the two types are equal
         Type::Float | Type::Location | Type::Qubit => {
             if matches!(t2, Type::Int) || t1 == t2 {
+                Some(t1.clone())
+            } else if matches!(t2, Type::Unknown) {
                 Some(t1.clone())
             } else {
                 None
@@ -1143,7 +1789,7 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
                 && types_compatible(r1, r2)
         }
         (Type::UserDef(n1), Type::UserDef(n2)) => n1 == n2,
-
+        (Type::Generic(_), Type::Generic(_)) => true,
         _ => false,
     }
 }
@@ -1228,120 +1874,119 @@ pub fn suggest_next_from_type(
 ///
 /// TODO: Returning the string is good for readability, however this make the fcn HEAVY when used
 /// on things that we aren't sure will match.
-/// TODO: Think there may be a bug with this, if there are some kind of nested generics.
-pub fn infer_generic_type(
-    type_with_generics: &Type,
-    actual_type: &Type,
-    map: &mut HashMap<u8, Type>,
-) -> Result<(), String> {
-    match type_with_generics {
-        Type::Generic(n) => {
-            // then, whatever actual_type is, that's what we put in as the
-            // mapping!
-            // ... unless it is unknown.
-            if let Type::Unknown = actual_type {
-                // don't add the mapping!
-                Ok(())
-            } else {
-                match map.insert(*n, actual_type.clone()) {
-                    None => Ok(()),
-                    Some(t) => {
-                        if t == *actual_type {
-                            Ok(())
-                        } else {
-                            Err("Multiple definitions for the generic.".to_string())
-                        }
-                    }
-                }
-            }
-        }
-        Type::Vec(generic_inner) => {
-            if let Type::Vec(actual_inner) = actual_type {
-                infer_generic_type(generic_inner, actual_inner, map)
-            } else {
-                // TODO error?! need diagnostics too for error reporting
-                Err(format!(
-                    "Generic expects Vec: {}, but actual did not have Vec and instead had: {}",
-                    type_with_generics, actual_type
-                ))
-            }
-        }
-        Type::Tuple(generic_items) => {
-            if let Type::Tuple(actual_items) = actual_type {
-                // TODO error if sizes are different
-                if generic_items.len() != actual_items.len() {
-                    Err(format!(
-                        "Generic expects Tuple of size {}, but got Tuple of size {}.",
-                        generic_items.len(),
-                        actual_items.len()
-                    ))
-                } else {
-                    generic_items
-                        .iter()
-                        .zip(actual_items.iter())
-                        .try_fold((), |_, (generic, actual)| {
-                            infer_generic_type(generic, actual, map)
-                        })
-                }
-            } else {
-                // TODO error?! need diagnostics too for error reporting
-                Err(format!(
-                    "Generic expects Tuple: {}, but actual did not have Tuple and instead had: {}",
-                    type_with_generics, actual_type
-                ))
-            }
-        }
-        Type::Option(generic_inner) => {
-            if let Type::Option(actual_inner) = actual_type {
-                infer_generic_type(generic_inner, actual_inner, map)
-            } else {
-                // TODO error?! need diagnostics too for error reporting
-                Err(format!(
-                    "Generic expects Option: {}, but actual did not have Option and instead had: {}",
-                    type_with_generics, actual_type
-                ))
-            }
-        }
-        Type::Function {
-            params: generic_params,
-            return_type: generic_return,
-        } => {
-            if let Type::Function {
-                params: actual_params,
-                return_type: actual_return,
-            } = actual_type
-            {
-                if generic_params.len() != actual_params.len() {
-                    Err(format!(
-                        "Generic expects params to function of length {}, but got params to function of length {}.",
-                        generic_params.len(),
-                        actual_params.len()
-                    ))
-                } else {
-                    generic_params
-                        .iter()
-                        .zip(actual_params.iter())
-                        .try_fold((), |_, (generic, actual)| {
-                            infer_generic_type(generic, actual, map)
-                        })
-                        .and(infer_generic_type(generic_return, actual_return, map))
-                }
-            } else {
-                Err(format!(
-                    "Generic expects Function: {}, but actual did not have Function and instead had: {}",
-                    type_with_generics, actual_type
-                ))
-            }
-        }
-        _ => {
-            if type_with_generics == actual_type {
-                Ok(())
-            } else {
-                Err("Types did not match".to_string())
-            }
-        }
-    }
-}
+// pub fn infer_generic_type(
+//     type_with_generics: &Type,
+//     actual_type: &Type,
+//     map: &mut HashMap<u8, Type>,
+// ) -> Result<(), String> {
+//     match type_with_generics {
+//         Type::Generic(n) => {
+//             // then, whatever actual_type is, that's what we put in as the
+//             // mapping!
+//             // ... unless it is unknown.
+//             if let Type::Unknown = actual_type {
+//                 // don't add the mapping!
+//                 Ok(())
+//             } else {
+//                 match map.insert(*n, actual_type.clone()) {
+//                     None => Ok(()),
+//                     Some(t) => {
+//                         if t == *actual_type {
+//                             Ok(())
+//                         } else {
+//                             Err("Multiple definitions for the generic.".to_string())
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//         Type::Vec(generic_inner) => {
+//             if let Type::Vec(actual_inner) = actual_type {
+//                 infer_generic_type(generic_inner, actual_inner, map)
+//             } else {
+//                 // TODO error?! need diagnostics too for error reporting
+//                 Err(format!(
+//                     "Generic expects Vec: {}, but actual did not have Vec and instead had: {}",
+//                     type_with_generics, actual_type
+//                 ))
+//             }
+//         }
+//         Type::Tuple(generic_items) => {
+//             if let Type::Tuple(actual_items) = actual_type {
+//                 // TODO error if sizes are different
+//                 if generic_items.len() != actual_items.len() {
+//                     Err(format!(
+//                         "Generic expects Tuple of size {}, but got Tuple of size {}.",
+//                         generic_items.len(),
+//                         actual_items.len()
+//                     ))
+//                 } else {
+//                     generic_items
+//                         .iter()
+//                         .zip(actual_items.iter())
+//                         .try_fold((), |_, (generic, actual)| {
+//                             infer_generic_type(generic, actual, map)
+//                         })
+//                 }
+//             } else {
+//                 // TODO error?! need diagnostics too for error reporting
+//                 Err(format!(
+//                     "Generic expects Tuple: {}, but actual did not have Tuple and instead had: {}",
+//                     type_with_generics, actual_type
+//                 ))
+//             }
+//         }
+//         Type::Option(generic_inner) => {
+//             if let Type::Option(actual_inner) = actual_type {
+//                 infer_generic_type(generic_inner, actual_inner, map)
+//             } else {
+//                 // TODO error?! need diagnostics too for error reporting
+//                 Err(format!(
+//                     "Generic expects Option: {}, but actual did not have Option and instead had: {}",
+//                     type_with_generics, actual_type
+//                 ))
+//             }
+//         }
+//         Type::Function {
+//             params: generic_params,
+//             return_type: generic_return,
+//         } => {
+//             if let Type::Function {
+//                 params: actual_params,
+//                 return_type: actual_return,
+//             } = actual_type
+//             {
+//                 if generic_params.len() != actual_params.len() {
+//                     Err(format!(
+//                         "Generic expects params to function of length {}, but got params to function of length {}.",
+//                         generic_params.len(),
+//                         actual_params.len()
+//                     ))
+//                 } else {
+//                     generic_params
+//                         .iter()
+//                         .zip(actual_params.iter())
+//                         .try_fold((), |_, (generic, actual)| {
+//                             infer_generic_type(generic, actual, map)
+//                         })
+//                         .and(infer_generic_type(generic_return, actual_return, map))
+//                 }
+//             } else {
+//                 Err(format!(
+//                     "Generic expects Function: {}, but actual did not have Function and instead had: {}",
+//                     type_with_generics, actual_type
+//                 ))
+//             }
+//         }
+//         _ => {
+//             if type_with_generics == actual_type {
+//                 Ok(())
+//             } else {
+//                 Err("Types did not match".to_string())
+//             }
+//         }
+//     }
+// }
 
 pub fn contains_unknown(typ: &Type) -> bool {
     match typ {
@@ -1369,31 +2014,31 @@ pub fn contains_unknown(typ: &Type) -> bool {
     }
 }
 
-pub fn contains_generic(typ: &Type) -> bool {
-    match typ {
-        Type::Int
-        | Type::Float
-        | Type::Bool
-        | Type::String
-        | Type::Location
-        | Type::Qubit
-        | Type::QubitMap
-        | Type::Gate
-        | Type::ArchT
-        | Type::StateT
-        | Type::InstrT
-        | Type::UserDef(_)
-        | Type::Unknown => false,
-        Type::Vec(t) => contains_generic(t),
-        Type::Tuple(items) => items.iter().any(contains_generic),
-        Type::Option(t) => contains_generic(t),
-        Type::Function {
-            params,
-            return_type,
-        } => params.iter().any(contains_generic) || contains_generic(return_type),
-        Type::Generic(_) => true,
-    }
-}
+// pub fn contains_generic(typ: &Type) -> bool {
+//     match typ {
+//         Type::Int
+//         | Type::Float
+//         | Type::Bool
+//         | Type::String
+//         | Type::Location
+//         | Type::Qubit
+//         | Type::QubitMap
+//         | Type::Gate
+//         | Type::ArchT
+//         | Type::StateT
+//         | Type::InstrT
+//         | Type::UserDef(_)
+//         | Type::Unknown => false,
+//         Type::Vec(t) => contains_generic(t),
+//         Type::Tuple(items) => items.iter().any(contains_generic),
+//         Type::Option(t) => contains_generic(t),
+//         Type::Function {
+//             params,
+//             return_type,
+//         } => params.iter().any(contains_generic) || contains_generic(return_type),
+//         Type::Generic(_) => true,
+//     }
+// }
 
 /// Given an expression, PASSIVELY changes its type to a new type. Does so
 /// recursively.
@@ -1516,8 +2161,9 @@ pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
                 BinaryOperator::Or => {
                     // same as above
                 }
-                BinaryOperator::Range => todo!(),
-                BinaryOperator::Tensor => todo!(),
+                BinaryOperator::Range | BinaryOperator::Tensor => {
+                    // unclear what if anything should happen here
+                },
             }
         },
         ExprKind::UnaryOp { operand, .. } => {
@@ -1555,32 +2201,34 @@ pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
 /// generics. It likely means that there is a dependency of one generic on
 /// another, which can (hopefully) be resolved by making substitutions and then
 /// repeating the generic inference process.
-pub fn degenerisize(type_with_generics: &Type, generic_map: &HashMap<u8, Type>) -> (bool, Type) {
+/// 
+/// TODO abolish this, repetitive with stuff in GenericTable
+pub fn degenerisize(type_with_generics: &Type, generic_table: &GenericTable) -> (bool, Type) {
     match type_with_generics {
-        Type::Generic(c) => match generic_map.get(c) {
+        Type::Generic(c) => match generic_table.get(c) {
             Some(t) => (true, t.clone()),
             None => (false, Type::Generic(*c)),
         },
         Type::Vec(inner) => {
-            let contents = degenerisize(inner, generic_map);
+            let contents = degenerisize(inner, generic_table);
             (contents.0, Type::Vec(Box::new(contents.1)))
         }
         Type::Tuple(items) => {
-            let results = items.iter().map(|elt| degenerisize(elt, generic_map));
+            let results = items.iter().map(|elt| degenerisize(elt, generic_table));
             let done = results.clone().all(|b| b.0);
 
             (done, Type::Tuple(results.map(|elt| elt.1).collect()))
         }
         Type::Option(inner) => {
-            let contents = degenerisize(inner, generic_map);
+            let contents = degenerisize(inner, generic_table);
             (contents.0, Type::Option(Box::new(contents.1)))
         }
         Type::Function {
             params,
             return_type,
         } => {
-            let params_results = params.iter().map(|elt| degenerisize(elt, generic_map));
-            let return_type_results = degenerisize(return_type, generic_map);
+            let params_results = params.iter().map(|elt| degenerisize(elt, generic_table));
+            let return_type_results = degenerisize(return_type, generic_table);
             let done = params_results.clone().all(|b| b.0) && return_type_results.0;
 
             (
@@ -1674,7 +2322,7 @@ mod tests {
             diagnostics: &mut diags,
             type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
-            last_generic_num: &mut 0,
+            generic_table: &mut GenericTable::new(),
         };
 
         let def_range = Range {
@@ -1830,7 +2478,7 @@ mod tests {
             diagnostics: &mut diags,
             type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
-            last_generic_num: &mut 0,
+            generic_table: &mut GenericTable::new(),
         };
 
         let def_range = Range {
@@ -1906,7 +2554,7 @@ mod tests {
             diagnostics: &mut diags,
             type_map: &mut TypeMap::new(),
             user_def_table: &UserDefTable::empty(),
-            last_generic_num: &mut 0
+            generic_table: &mut GenericTable::new()
         };
 
         let def_range = Range {
