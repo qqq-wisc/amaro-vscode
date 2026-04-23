@@ -3,7 +3,6 @@ use amaro_lsp::parser::symbols::Type;
 use amaro_lsp::parser::{check_semantics, overlay_type, parse_file};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
-
 const MOCK_MANDATORY_BLOCKS: &str = r#"
 RouteInfo:
     routed_gates = CX
@@ -34,7 +33,7 @@ pub fn diags_no_errors(diags: &Vec<Diagnostic>) -> bool {
 fn capitalization_warning() {
     let input = format!("{}\narchitecture[name='test']", MOCK_MANDATORY_BLOCKS);
     let file = parse_file(&input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let cap_errors: Vec<_> = diags
         .iter()
@@ -53,7 +52,7 @@ fn capitalization_warning() {
 fn no_warning_for_correct_capitalization() {
     let input = format!("{}\nArchitecture[name='test']", MOCK_MANDATORY_BLOCKS);
     let file = parse_file(&input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let cap_errors: Vec<_> = diags
         .iter()
@@ -71,7 +70,7 @@ fn test_all_valid_no_errors() {
     let input = MOCK_MANDATORY_BLOCKS;
 
     let file = parse_file(&input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     assert!(
         diags_no_errors(&diags),
@@ -85,7 +84,7 @@ fn test_missing_mandatory_blocks() {
     // Only Architecture, missing RouteInfo and TransitionInfo
     let input = "Architecture[name='test']";
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     assert!(
         diags
@@ -114,7 +113,7 @@ RouteInfo:
     "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     assert_eq!(
         diags.len(),
@@ -142,7 +141,7 @@ RouteInfo:
     "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     assert_eq!(diags.len(), 2, "Should have 2 errors: duplicate + missing");
 
@@ -170,7 +169,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(&input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -214,7 +213,7 @@ TransitionInfo:
     assert!(has_struct, "RouteInfo should contain a struct definition");
 
     // Should still pass semantic checks
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -237,7 +236,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let warnings: Vec<_> = diags
         .iter()
@@ -272,7 +271,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let warnings: Vec<_> = diags
         .iter()
@@ -310,7 +309,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let warnings: Vec<_> = diags
         .iter()
@@ -335,7 +334,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let warnings: Vec<_> = diags
         .iter()
@@ -376,7 +375,7 @@ fn test_semantic_checks_work_with_bracket_syntax() {
     "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     assert!(
         diags_no_errors(&diags),
         "Semantics should work for Bracket syntax too"
@@ -396,7 +395,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -425,7 +424,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -453,7 +452,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -480,7 +479,7 @@ TransitionInfo:
     get_transitions = []
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -508,7 +507,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -535,7 +534,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -562,7 +561,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -597,7 +596,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -624,7 +623,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -646,7 +645,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let undefined_errors: Vec<_> = diags
         .iter()
@@ -672,7 +671,7 @@ TransitionInfo:
 "#;
 
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let undefined_errors: Vec<_> = diags
         .iter()
@@ -688,15 +687,15 @@ fn test_qubit_index_on_qubitmap() {
     let input = r#"
 RouteInfo:
     routed_gates = CX
-    GateRealization{u : Location, v : Location}
-    realize_gate = State.map[Gate.qubits[0]]
+    GateRealization{u : Location}
+    realize_gate = Vec().push(GateRealization{u = State.map[Gate.qubits[0]]})
 TransitionInfo:
     get_transitions = []
     apply = identity_application(step)
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -721,7 +720,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -748,7 +747,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -775,7 +774,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -803,7 +802,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -827,7 +826,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -851,7 +850,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let has_error = diags
         .iter()
         .any(|d| d.message.to_lowercase().contains("bool"));
@@ -876,7 +875,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let has_type_error = diags
         .iter()
         .any(|d| d.severity == Some(DiagnosticSeverity::ERROR));
@@ -900,7 +899,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -925,7 +924,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let has_field_warning = diags.iter().any(|d| {
         d.message.to_lowercase().contains("nonexistent")
             || d.message.to_lowercase().contains("no field")
@@ -948,7 +947,7 @@ TransitionInfo:
     cost = true
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let has_cost_error = diags
         .iter()
         .any(|d| d.message.contains("cost") && d.message.to_lowercase().contains("float"));
@@ -971,7 +970,7 @@ TransitionInfo:
     cost = 1.5
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let cost_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("cost"))
@@ -996,7 +995,7 @@ TransitionInfo:
     cost = 0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let cost_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("cost"))
@@ -1020,7 +1019,7 @@ TransitionInfo:
     cost = 'oops'
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let has_cost_error = diags
         .iter()
         .any(|d| d.message.contains("cost") && d.message.to_lowercase().contains("float"));
@@ -1045,7 +1044,7 @@ TransitionInfo:
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let has_debug_artifact = diags.iter().any(|d| d.message.contains("Box("));
     assert!(
         !has_debug_artifact,
@@ -1067,7 +1066,7 @@ TransitionInfo:
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let has_debug_artifact = diags.iter().any(|d| d.message.contains("Box("));
     assert!(
         !has_debug_artifact,
@@ -1089,7 +1088,7 @@ TransitionInfo:
     cost = 1.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1114,7 +1113,7 @@ TransitionInfo:
     cost = -1
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1144,7 +1143,7 @@ GateRealization:
     data = Transition.edge.(0)
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Transition'"))
@@ -1169,7 +1168,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef_arch: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Arch'"))
@@ -1194,7 +1193,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef_arch: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Arch'"))
@@ -1218,7 +1217,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined") || d.message.contains("non-function"))
@@ -1245,7 +1244,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined") || d.message.contains("non-function"))
@@ -1271,7 +1270,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let missing_apply = diags
         .iter()
@@ -1305,7 +1304,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     let return_diag = diags
         .iter()
@@ -1336,7 +1335,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1362,7 +1361,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef_step: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable") && d.message.contains("Step"))
@@ -1387,7 +1386,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     // No errors should occur in a valid file — 'step' being Int is an internal guarantee
     let errors: Vec<_> = diags
         .iter()
@@ -1412,7 +1411,7 @@ TransitionInfo:
     cost = 0.0
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1437,7 +1436,7 @@ TransitionInfo:
     cost = max(min(1, 2), abs(0))
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1449,30 +1448,35 @@ TransitionInfo:
     );
 }
 
-#[test]
-fn test_consistent_and_to_2d_registered() {
-    // consistent and to_2d should resolve without "Undefined variable" errors.
-    let input = r#"
-RouteInfo:
-    routed_gates = CX
-    realize_gate = []
-TransitionInfo:
-    get_transitions = []
-    apply = consistent([], State.map())
-    cost = 0.0
-"#;
-    let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
-    let undef: Vec<_> = diags
-        .iter()
-        .filter(|d| d.message.contains("Undefined variable 'consistent'"))
-        .collect();
-    assert!(
-        undef.is_empty(),
-        "'consistent' should be registered as a built-in. Got: {:?}",
-        undef
-    );
-}
+
+// TODO I am uncertain whether this test should be included.
+// I can only find references to consistent and to_2d in old files with now
+// invalid syntax.
+// I will ask about these features. For now, this test will be commented out.
+// #[test]
+// fn test_consistent_and_to_2d_registered() {
+//     // consistent and to_2d should resolve without "Undefined variable" errors.
+//     let input = r#"
+// RouteInfo:
+//     routed_gates = CX
+//     realize_gate = []
+// TransitionInfo:
+//     get_transitions = []
+//     apply = consistent([], State.map())
+//     cost = 0.0
+// "#;
+//     let file = parse_file(input).unwrap();
+//     let diags = check_semantics(&file).diagnostics;
+//     let undef: Vec<_> = diags
+//         .iter()
+//         .filter(|d| d.message.contains("Undefined variable 'consistent'"))
+//         .collect();
+//     assert!(
+//         undef.is_empty(),
+//         "'consistent' should be registered as a built-in. Got: {:?}",
+//         undef
+//     );
+// }
 
 #[test]
 fn test_missing_builtins_no_undefined_error() {
@@ -1487,7 +1491,7 @@ TransitionInfo:
     cost = max(0, abs(0))
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1514,7 +1518,7 @@ TransitionInfo:
     get_transitions = []
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1541,7 +1545,7 @@ TransitionInfo:
     get_transitions = []
 "#;
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let keyword_errors: Vec<_> = diags
         .iter()
         .filter(|d| {
@@ -1571,7 +1575,7 @@ TransitionInfo:
     // If is_keyword works correctly, fields named 'match' or 'with' would be rejected.
     // Just verify the valid file above parses and validates cleanly.
     let file = parse_file(input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1611,13 +1615,15 @@ fn test_overlay_basic_types_onto_self() {
         Type::StateT,
         Type::String,
     ];
-    
-    background_types.iter_mut().zip(foreground_types.iter()).for_each(|pair| {
-        assert!(!overlay_type(pair.0, pair.1));
-        assert_eq!(*pair.0, *pair.1);
-    });
-}
 
+    background_types
+        .iter_mut()
+        .zip(foreground_types.iter())
+        .for_each(|pair| {
+            assert!(!overlay_type(pair.0, pair.1));
+            assert_eq!(*pair.0, *pair.1);
+        });
+}
 
 #[test]
 fn test_overlay_basic_types_onto_others() {
@@ -1648,12 +1654,15 @@ fn test_overlay_basic_types_onto_others() {
         Type::StateT,
         Type::String,
     ];
-    
-    background_types.iter_mut().zip(foreground_types.iter()).for_each(|pair| {
-        let original_type = pair.0.clone();
-        assert!(!overlay_type(pair.0, pair.1));
-        assert_eq!(*pair.0, original_type);
-    });
+
+    background_types
+        .iter_mut()
+        .zip(foreground_types.iter())
+        .for_each(|pair| {
+            let original_type = pair.0.clone();
+            assert!(!overlay_type(pair.0, pair.1));
+            assert_eq!(*pair.0, original_type);
+        });
 }
 
 #[test]
@@ -1676,45 +1685,49 @@ fn test_overlay_onto_generic() {
 
 #[test]
 fn test_overlay_complex() {
-    
-
-    let mut t1: Type = Type::Function { params: vec![
-        Type::Generic(1), // init acc value
-        Type::Function { params: vec![
-            Type::Generic(0), // elt
-            Type::Generic(1), // acc
-        ], 
-        return_type: Box::new(Type::Generic(1)) // gives acc val
-        },
-        Type::Vec(Box::new(Type::Generic(0))) // collection of elts
-        ], return_type: Box::new(Type::Generic(1)) // final acc value
+    let mut t1: Type = Type::Function {
+        params: vec![
+            Type::Generic(1), // init acc value
+            Type::Function {
+                params: vec![
+                    Type::Generic(0), // elt
+                    Type::Generic(1), // acc
+                ],
+                return_type: Box::new(Type::Generic(1)), // gives acc val
+            },
+            Type::Vec(Box::new(Type::Generic(0))), // collection of elts
+        ],
+        return_type: Box::new(Type::Generic(1)), // final acc value
     };
     let original_type = t1.clone();
 
     let wrong_type = Type::Bool;
 
-    
-
     assert!(!overlay_type(&mut t1, &wrong_type));
     assert_eq!(original_type, t1);
 
-    let half_match_expected_out = Type::Function { params: vec![
-        Type::Int, // init acc value
-        Type::Function { params: vec![
-            Type::Generic(0), // elt
-            Type::Generic(1), // acc
-        ], 
-        return_type: Box::new(Type::Generic(1)) // gives acc val
-        },
-        Type::Vec(Box::new(Type::Generic(0))) // collection of elts
-        ], return_type: Box::new(Type::Int) // final acc value
+    let half_match_expected_out = Type::Function {
+        params: vec![
+            Type::Int, // init acc value
+            Type::Function {
+                params: vec![
+                    Type::Generic(0), // elt
+                    Type::Generic(1), // acc
+                ],
+                return_type: Box::new(Type::Generic(1)), // gives acc val
+            },
+            Type::Vec(Box::new(Type::Generic(0))), // collection of elts
+        ],
+        return_type: Box::new(Type::Int), // final acc value
     };
 
-    let half_match_foreground = Type::Function { params: vec![
-        Type::Int, // init acc value
-        Type::Bool,
-        Type::Option(Box::new(Type::Int)) // collection of elts
-        ], return_type: Box::new(Type::Int) // final acc value
+    let half_match_foreground = Type::Function {
+        params: vec![
+            Type::Int, // init acc value
+            Type::Bool,
+            Type::Option(Box::new(Type::Int)), // collection of elts
+        ],
+        return_type: Box::new(Type::Int), // final acc value
     };
 
     assert!(overlay_type(&mut t1, &half_match_foreground));

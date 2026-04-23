@@ -89,6 +89,15 @@ pub enum TypeAnnotation {
     },
 }
 
+/// An identifier that has a range attached.
+/// This is useful for things like lambda expressions, where the identifier is
+/// not an expression, but we want to know it's range too.
+#[derive(Debug, Clone)]
+pub struct RangedIdentifier {
+    pub string: String,
+    pub range: Range,
+}
+
 #[derive(Debug, Clone)]
 pub struct Expr {
     pub kind: ExprKind,
@@ -135,7 +144,7 @@ pub enum ExprKind {
 
     // Lambda expressions
     Lambda {
-        params: Vec<String>,
+        params: Vec<RangedIdentifier>,
         body: Box<Expr>,
     },
 
@@ -148,7 +157,7 @@ pub enum ExprKind {
 
     // Let binding
     LetBinding {
-        name: String,
+        name: RangedIdentifier,
         value: Box<Expr>,
         body: Box<Expr>,
     },
@@ -388,10 +397,17 @@ impl Expr {
                 format!("{}.{}", object.format_summary(), field)
             }
             ExprKind::Lambda { params, .. } => {
-                format!("|{}| -> ...", params.join(", "))
+                format!(
+                    "|{}| -> ...",
+                    params
+                        .iter()
+                        .map(|f| f.string.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
             ExprKind::IfThenElse { .. } => "if-then-else".to_string(),
-            ExprKind::LetBinding { name, .. } => format!("let {}", name),
+            ExprKind::LetBinding { name, .. } => format!("let {}", name.string),
             ExprKind::Some(_) => "Some(...)".to_string(),
             ExprKind::None => "None".to_string(),
             ExprKind::TensorProduct { .. } => "⊗".to_string(),

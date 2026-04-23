@@ -463,6 +463,9 @@ pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {
             }
             Err(_) => {
                 // Error recovery
+
+                // TODO the error recovery method here seems to be just silently
+                // dropping the entire block.
                 if let Some(pos) = current_input.find('\n') {
                     current_input = &current_input[pos + 1..];
                 } else {

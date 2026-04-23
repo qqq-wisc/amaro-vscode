@@ -6,12 +6,12 @@ fn test_advanced_features_and_vectors() {
     RouteInfo:
         routed_gates = CX
         
-        GateRealization{path : Vec()}
+        GateRealization{path : Vec<Location>}
         
         realize_gate = 
             if (Gate.gate_type()) == CX 
             then 
-                (let v = Vec() in
+                map(|x| -> GateRealization{path = x},(let v = Vec() in
                 let v2 = v.push(Location(0)) in
                 let v3 = v.extend(v2) in
                 let popped = v3.pop() in
@@ -19,7 +19,7 @@ fn test_advanced_features_and_vectors() {
                 all_paths(Arch, 
                             vertical_neighbors(State.map[Gate.qubits[0]], 10, 10), 
                             horizontal_neighbors(State.map[Gate.qubits[1]], 10), 
-                            Vec()))
+                            Vec())))
             else 
                 Vec()
 
@@ -39,7 +39,7 @@ fn test_advanced_features_and_vectors() {
     "#;
 
     let file = parse_file(&input).unwrap();
-    let (diags, _, _) = check_semantics(&file);
+    let diags = check_semantics(&file).diagnostics;
 
     // 3. Assert NO Errors
     for diag in &diags {

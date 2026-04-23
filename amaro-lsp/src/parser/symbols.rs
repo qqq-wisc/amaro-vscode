@@ -97,52 +97,62 @@ impl Type {
             },
         }
     }
-    
+
     /// Markdown doesn't render <> properly.
     /// So, use this for rendering those.
     /// Uses standard formatting usually.
     pub fn to_markdown_display(&self) -> String {
+        format!("```rust\n{}\n```", self._to_markdown_display_recursive())
+    }
+    fn _to_markdown_display_recursive(&self) -> String {
         match self {
-            Type::Int |
-            Type::Float |
-            Type::Bool |
-            Type::String |
-            Type::Location |
-            Type::Qubit |
-            Type::QubitMap |
-            Type::Gate |
-            Type::ArchT |
-            Type::StateT |
-            Type::InstrT |
-            Type::Unknown |
-            Type::UserDef(_) |
-            Type::Generic(_)=> format!("{}", self), // fall back to default, no nesting
-            Type::Function { params, return_type } => {
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::Unknown
+            | Type::UserDef(_)
+            | Type::Generic(_) => format!("{}", self), // fall back to default, no nesting
+            Type::Function {
+                params,
+                return_type,
+            } => {
                 let mut iter = params.iter();
                 let mut string = String::new();
                 if let Some(first) = iter.next() {
-                    string += first.to_markdown_display().as_str();
+                    string += first._to_markdown_display_recursive().as_str();
                     for item in iter {
                         string += ", ";
-                        string += item.to_markdown_display().as_str();
+                        string += item._to_markdown_display_recursive().as_str();
                     }
                 }
-                format!("|{}| -> {}", string, return_type.to_markdown_display().as_str())
-            },
+                format!(
+                    "|{}| -> {}",
+                    string,
+                    return_type._to_markdown_display_recursive().as_str()
+                )
+            }
             Type::Tuple(items) => {
                 let mut iter = items.iter();
                 let mut string = String::new();
                 if let Some(first) = iter.next() {
-                    string += first.to_markdown_display().as_str();
+                    string += first._to_markdown_display_recursive().as_str();
                     for item in iter {
                         string += ", ";
-                        string += item.to_markdown_display().as_str();
+                        string += item._to_markdown_display_recursive().as_str();
                     }
                 }
                 format!("({})", string)
-            },
-            Type::Vec(inner) => format!("Vec&lt;{}&gt;", inner.to_markdown_display()),
-            Type::Option(inner) => format!("Option&lt;{}&gt;", inner.to_markdown_display()),
+            }
+            Type::Vec(inner) => format!("Vec<{}>", inner._to_markdown_display_recursive()),
+            Type::Option(inner) => format!("Option<{}>", inner._to_markdown_display_recursive()),
         }
     }
 
@@ -150,46 +160,26 @@ impl Type {
     pub fn contains_generic(&self) -> bool {
         match self {
             Type::Generic(_) => true,
-            Type::Int |
-            Type::Float |
-            Type::Bool |
-            Type::String |
-            Type::Location |
-            Type::Qubit |
-            Type::QubitMap |
-            Type::Gate |
-            Type::ArchT |
-            Type::StateT |
-            Type::InstrT |
-            Type::UserDef(_) |
-            Type::Unknown => false,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::UserDef(_)
+            | Type::Unknown => false,
             Type::Vec(inner) => inner.contains_generic(),
             Type::Tuple(items) => items.iter().any(|f| f.contains_generic()),
             Type::Option(inner) => inner.contains_generic(),
-            Type::Function { params, return_type } => return_type.contains_generic() || params.iter().any(|f| f.contains_generic()),
-        }
-    }
-
-    pub fn contains_unknown(&self) -> bool {
-        match self {
-            Type::Unknown => true,
-            Type::Generic(_) |
-            Type::Int |
-            Type::Float |
-            Type::Bool |
-            Type::String |
-            Type::Location |
-            Type::Qubit |
-            Type::QubitMap |
-            Type::Gate |
-            Type::ArchT |
-            Type::StateT |
-            Type::InstrT |
-            Type::UserDef(_) => false,
-            Type::Vec(inner) => inner.contains_unknown(),
-            Type::Tuple(items) => items.iter().any(|f| f.contains_unknown()),
-            Type::Option(inner) => inner.contains_unknown(),
-            Type::Function { params, return_type } => return_type.contains_unknown() || params.iter().any(|f| f.contains_unknown()),
+            Type::Function {
+                params,
+                return_type,
+            } => return_type.contains_generic() || params.iter().any(|f| f.contains_generic()),
         }
     }
 
@@ -197,22 +187,28 @@ impl Type {
         match self {
             Type::Unknown => true,
             Type::Generic(_) => true,
-            Type::Int |
-            Type::Float |
-            Type::Bool |
-            Type::String |
-            Type::Location |
-            Type::Qubit |
-            Type::QubitMap |
-            Type::Gate |
-            Type::ArchT |
-            Type::StateT |
-            Type::InstrT |
-            Type::UserDef(_) => false,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::UserDef(_) => false,
             Type::Vec(inner) => inner.contains_generic_or_unknown(),
             Type::Tuple(items) => items.iter().any(|f| f.contains_generic_or_unknown()),
             Type::Option(inner) => inner.contains_generic_or_unknown(),
-            Type::Function { params, return_type } => return_type.contains_generic_or_unknown() || params.iter().any(|f| f.contains_generic_or_unknown()),
+            Type::Function {
+                params,
+                return_type,
+            } => {
+                return_type.contains_generic_or_unknown()
+                    || params.iter().any(|f| f.contains_generic_or_unknown())
+            }
         }
     }
 }

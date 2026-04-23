@@ -1,15 +1,18 @@
-// place for defining built-in keywords and functions. this means "raw" functions like
-// map, but also functions like .contains on a vec. also just types too, like Arch.
-// the SymbolTable should derive from this, along with everything else.
-// no hard-coding should take place except for in here.
-// then, if later plans change about the types, only this needs to be modified.
+// Place for defining built-in keywords and functions. This means "raw" functions like
+// map, but also functions like .contains on a Vec. Also just types too, like Arch.
+// The SymbolTable should derive from this, along with everything else.
+// No hard-coding should take place except for in here.
+// Then, if later plans change about the types, only this needs to be modified.
 
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, MarkupContent,
 };
 
 use crate::parser::{FetchAndAdd, GenericTable, semantics, symbols::Type};
-use std::{collections::{HashMap, HashSet}, sync::OnceLock};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::OnceLock,
+};
 
 pub enum Owner<'a, T> {
     Owned(T),
@@ -33,100 +36,126 @@ pub struct FieldInfo {
     /// Human-readable information about the field.
     pub info: String,
     /// The type of the field. ALWAYS a function.
-    pub typ: Type
+    pub typ: Type,
 }
 
 impl FieldInfo {
     pub fn show_details(&self) -> String {
         let mut type_to_show: &Type = &self.typ;
-        if let Type::Function { params, return_type } = &self.typ {
+        if let Type::Function {
+            params,
+            return_type,
+        } = &self.typ
+        {
             // if no params, just put return type
-            if (params.len() == 0) {
+            if params.is_empty() {
                 type_to_show = return_type;
             }
         }
-        
-        format!("## {}\n *In block {}*\n\n{}\n\n{}", self.field_name, self.block_name, type_to_show.to_markdown_display(), self.info)
+
+        format!(
+            "## {}\n *In block {}*\n\n{}\n\n{}",
+            self.field_name,
+            self.block_name,
+            type_to_show.to_markdown_display(),
+            self.info
+        )
     }
 }
 
 fn init_fields() -> Vec<FieldInfo> {
     // order doesn't matter
     vec![
-        FieldInfo { 
-            block_name: "TransitionInfo".to_string(), 
-            field_name: "cost".to_string(), 
+        FieldInfo {
+            block_name: "ArchInfo".to_string(),
+            field_name: "get_locations".to_string(),
+            info: "".to_string(), // TODO info for this
+            typ: Type::Function {
+                params: Vec::new(), // TODO not sure what to put here
+                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
+            },
+        },
+        FieldInfo {
+            block_name: "StateInfo".to_string(),
+            field_name: "cost".to_string(),
+            info: "Cost".to_string(), // TODO info for this
+            typ: Type::Function {
+                params: Vec::new(), // TODO not sure what to put here
+                return_type: Box::new(Type::Float),
+            },
+        },
+        FieldInfo {
+            block_name: "TransitionInfo".to_string(),
+            field_name: "cost".to_string(),
             info: "Cost of transitions".to_string(),
-            typ: Type::Function { params: vec![
-                    Type::UserDef("Transition".to_string())
-                ], return_type: Box::new(Type::Float)
-            }
+            typ: Type::Function {
+                params: vec![Type::UserDef("Transition".to_string())],
+                return_type: Box::new(Type::Float),
+            },
         },
-        FieldInfo { 
-            block_name: "RouteInfo".to_string(), 
-            field_name: "realize_gate".to_string(), 
+        FieldInfo {
+            block_name: "RouteInfo".to_string(),
+            field_name: "realize_gate".to_string(),
             info: "".to_string(), // TODO details
-            typ: Type::Function { params: vec![
-                    Type::ArchT,
-                    Type::StateT,
-                    Type::Gate
-                ], return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
-                "GateRealization".to_string(),
-            ))))
-            }
+            typ: Type::Function {
+                params: vec![Type::ArchT, Type::StateT, Type::Gate],
+                return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
+                    "GateRealization".to_string(),
+                )))),
+            },
         },
-        FieldInfo { 
-            block_name: "TransitionInfo".to_string(), 
-            field_name: "get_transitions".to_string(), 
+        FieldInfo {
+            block_name: "TransitionInfo".to_string(),
+            field_name: "get_transitions".to_string(),
             info: "".to_string(), // TODO details
             typ: Type::Function {
                 params: vec![Type::ArchT, Type::StateT],
                 return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))),
-            }
+            },
         },
-        FieldInfo { 
-            block_name: "TransitionInfo".to_string(), 
+        FieldInfo {
+            block_name: "TransitionInfo".to_string(),
             field_name: "apply".to_string(),
             info: "".to_string(), // TODO details
             typ: Type::Function {
                 params: vec![Type::QubitMap, Type::UserDef("Transition".to_string())],
                 return_type: Box::new(Type::QubitMap),
-            }
+            },
         },
-        FieldInfo { 
-            block_name: "RouteInfo".to_string(), 
-            field_name: "routed_gates".to_string(), 
+        FieldInfo {
+            block_name: "RouteInfo".to_string(),
+            field_name: "routed_gates".to_string(),
             info: "".to_string(), // TODO details
-            typ: Type::Function { params: vec![], 
-                return_type: Box::new(Type::Vec(Box::new(Type::Gate)))
-            }
+            typ: Type::Function {
+                params: vec![],
+                return_type: Box::new(Type::Vec(Box::new(Type::Gate))),
+            },
         },
     ]
 }
 
-
 pub fn field_lookup(block_name: &str, field_name: &str) -> Option<&'static FieldInfo> {
     let data = FIELDS.get_or_init(init_fields);
 
-    data.iter().find(|elt| elt.block_name == block_name && elt.field_name == field_name)
+    data.iter()
+        .find(|elt| elt.block_name == block_name && elt.field_name == field_name)
 }
-
 
 /// Given a type from the built-in, makes the generics inside it unique.
 pub fn make_generics_unique(typ: &mut Type, next_generic_num: &mut FetchAndAdd<u8>) {
     let mut generic_set: HashSet<u8> = HashSet::new();
     generic_visitor(typ, &mut generic_set);
 
-    if generic_set.len() == 0 {
+    if generic_set.is_empty() {
         return; // nothing else to do
     }
 
     // ok great. now, devise generic shifts.
     // maps from previos value to new value
-    let generic_shifts: HashMap<u8, u8> = generic_set.iter().map(|elt| {
-        (*elt, next_generic_num.next())
-    }).collect();
-
+    let generic_shifts: HashMap<u8, u8> = generic_set
+        .iter()
+        .map(|elt| (*elt, next_generic_num.fetch_and_add()))
+        .collect();
 
     // now finally, apply these shifts.
     generic_shift_applicator(typ, &generic_shifts);
@@ -134,56 +163,69 @@ pub fn make_generics_unique(typ: &mut Type, next_generic_num: &mut FetchAndAdd<u
 /// Visits a type, and identifies all the generics inside.
 fn generic_visitor(typ: &Type, set: &mut HashSet<u8>) {
     match typ {
-        Type::Int |
-        Type::Float |
-        Type::Bool |
-        Type::String |
-        Type::Location |
-        Type::Qubit |
-        Type::QubitMap |
-        Type::Gate |
-        Type::ArchT |
-        Type::StateT |
-        Type::InstrT |
-        Type::UserDef(_) |
-        Type::Unknown => {/* do nothing */}
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Location
+        | Type::Qubit
+        | Type::QubitMap
+        | Type::Gate
+        | Type::ArchT
+        | Type::StateT
+        | Type::InstrT
+        | Type::UserDef(_)
+        | Type::Unknown => { /* do nothing */ }
         Type::Vec(inner) => generic_visitor(inner, set),
         Type::Tuple(items) => items.iter().for_each(|elt| generic_visitor(elt, set)),
         Type::Option(inner) => generic_visitor(inner, set),
-        Type::Function { params, return_type } => {
+        Type::Function {
+            params,
+            return_type,
+        } => {
             params.iter().for_each(|elt| generic_visitor(elt, set));
             generic_visitor(return_type, set);
-        },
-        Type::Generic(c) => {set.insert(*c);},
+        }
+        Type::Generic(c) => {
+            set.insert(*c);
+        }
     }
 }
 
 fn generic_shift_applicator(typ: &mut Type, shifts: &HashMap<u8, u8>) {
     match typ {
-        Type::Int |
-        Type::Float |
-        Type::Bool |
-        Type::String |
-        Type::Location |
-        Type::Qubit |
-        Type::QubitMap |
-        Type::Gate |
-        Type::ArchT |
-        Type::StateT |
-        Type::InstrT |
-        Type::UserDef(_) |
-        Type::Unknown => {/* do nothing */}
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Location
+        | Type::Qubit
+        | Type::QubitMap
+        | Type::Gate
+        | Type::ArchT
+        | Type::StateT
+        | Type::InstrT
+        | Type::UserDef(_)
+        | Type::Unknown => { /* do nothing */ }
         Type::Vec(inner) => generic_shift_applicator(inner, shifts),
-        Type::Tuple(items) => items.iter_mut().for_each(|elt| generic_shift_applicator(elt, shifts)),
+        Type::Tuple(items) => items
+            .iter_mut()
+            .for_each(|elt| generic_shift_applicator(elt, shifts)),
         Type::Option(inner) => generic_shift_applicator(inner, shifts),
-        Type::Function { params, return_type } => {
-            params.iter_mut().for_each(|elt| generic_shift_applicator(elt, shifts));
+        Type::Function {
+            params,
+            return_type,
+        } => {
+            params
+                .iter_mut()
+                .for_each(|elt| generic_shift_applicator(elt, shifts));
             generic_shift_applicator(return_type, shifts);
-        },
-        Type::Generic(c) => {*typ = Type::Generic(*shifts.get(c).unwrap());},
+        }
+        Type::Generic(c) => {
+            *typ = Type::Generic(*shifts.get(c).unwrap());
+        }
     }
 }
-
 
 /// Given an identifier, gets the "raw" built-in associated with it.
 /// A "raw" built-in is something (usually a function) that is pre-defined
@@ -525,7 +567,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 Type::Function { params: vec![
                     Type::Generic(0), // elt
                     Type::Generic(1), // acc
-                ], 
+                ],
                 return_type: Box::new(Type::Generic(1)) // gives acc val
              },
                 Type::Vec(Box::new(Type::Generic(0))) // collection of elts
@@ -617,39 +659,49 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             // This should work for floats and ints.
             parent_type: None,
             identifier: "max".to_string(),
-            typ: Type::Function { 
+            typ: Type::Function {
                 params: vec![
-                    Type::Int,
-                    Type::Int
-                ], 
-                return_type: Box::new(Type::Int) },
-            details: "Maximum value of two integers.".to_string()
+                    Type::Float,
+                    Type::Float
+                ],
+                return_type: Box::new(Type::Float) },
+            details: "Maximum value of two floats.".to_string()
         },
         BuiltIn {
             // TODO how to represent this...?
             // This should work for floats and ints.
             parent_type: None,
             identifier: "min".to_string(),
-            typ: Type::Function { 
+            typ: Type::Function {
                 params: vec![
-                    Type::Int,
-                    Type::Int
-                ], 
-                return_type: Box::new(Type::Int) },
-            details: "Minimum value of two integers.".to_string()
+                    Type::Float,
+                    Type::Float
+                ],
+                return_type: Box::new(Type::Float) },
+            details: "Minimum value of two floats.".to_string()
         },
         BuiltIn {
             // TODO how to represent this...?
             // This should work for floats and ints.
             parent_type: None,
             identifier: "abs".to_string(),
-            typ: Type::Function { 
+            typ: Type::Function {
                 params: vec![
-                    Type::Int
-                ], 
-                return_type: Box::new(Type::Int) },
-            details: "Absolute value of an integer.".to_string()
+                    Type::Float
+                ],
+                return_type: Box::new(Type::Float) },
+            details: "Absolute value of a float.".to_string()
         },
+        BuiltIn {
+            parent_type: None,
+            identifier: "combinations".to_string(),
+            typ: Type::Function {
+                params: vec![
+                    Type::Vec(Box::new(Type::Generic(0))),
+                    Type::Int
+                ], return_type: Box::new(Type::Vec(Box::new(Type::Generic(0)))) },
+            details: "Combinations".to_string()
+        }
     ]),
     (
         Some(Type::Gate),
@@ -674,7 +726,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             BuiltIn {
                 parent_type: Some(Type::Gate),
                 identifier: "implementation".to_string(),
-                typ: Type::Unknown,
+                typ: Type::UserDef("GateRealization".to_string()),
                 details: "".to_string(), // TODO details
             },
             BuiltIn {
@@ -801,7 +853,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
                 parent_type: Some(Type::StateT),
                 identifier: "implemented_gates".to_string(),
                 typ: Type::Function { params: vec![],
-                    return_type: Box::new(Type::Vec(Box::new(Type::Gate))) }, // TODO what is the type of this?
+                    return_type: Box::new(Type::Vec(Box::new(Type::Gate))) },
                 details: "".to_string(), // TODO details
             },
         ],
@@ -1432,34 +1484,52 @@ mod tests {
         }
 
         if let Some(e) = field_lookup("TransitionInfo", "name garbage") {
-            panic!("Looking up valid block name but invalid field gave output: {:?}", e);
+            panic!(
+                "Looking up valid block name but invalid field gave output: {:?}",
+                e
+            );
         }
 
         if let Some(e) = field_lookup("block garbage", "cost") {
-            panic!("Looking up valid field name but invalid block gave output: {:?}", e);
+            panic!(
+                "Looking up valid field name but invalid block gave output: {:?}",
+                e
+            );
         }
 
         if let Some(e) = field_lookup("TransitionInfo", "realize_gate") {
-            panic!("Both block and field valid, but not together. Shouldn't have gotten: {:?}", e);
+            panic!(
+                "Both block and field valid, but not together. Shouldn't have gotten: {:?}",
+                e
+            );
         }
 
         {
             let lookup = field_lookup("TransitionInfo", "cost");
             assert!(lookup.is_some());
             let lookup = lookup.unwrap();
-            assert_eq!(lookup.typ, Type::Function { params: vec![Type::UserDef("Transition".to_string())], return_type: Box::new(Type::Float) });
+            assert_eq!(
+                lookup.typ,
+                Type::Function {
+                    params: vec![Type::UserDef("Transition".to_string())],
+                    return_type: Box::new(Type::Float)
+                }
+            );
         }
 
         {
             let lookup = field_lookup("RouteInfo", "realize_gate");
             assert!(lookup.is_some());
             let lookup = lookup.unwrap();
-            assert_eq!(lookup.typ, Type::Function {
-                params: vec![Type::ArchT, Type::StateT, Type::Gate],
-                return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
-                    "GateRealization".to_string(),
-                )))),
-            });
+            assert_eq!(
+                lookup.typ,
+                Type::Function {
+                    params: vec![Type::ArchT, Type::StateT, Type::Gate],
+                    return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
+                        "GateRealization".to_string(),
+                    )))),
+                }
+            );
         }
     }
 }

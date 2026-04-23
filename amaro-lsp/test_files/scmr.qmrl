@@ -9,7 +9,7 @@ RouteInfo:
             horizontal_neighbors(State.map[Gate.qubits[1]], arch.width), 
             ((values(State.map())).extend(Arch.magic_state_qubits()))
             .extend(fold(Vec(), |x, acc| -> acc.extend(x), 
-            map(|x| -> x.implementation.(path()), State.implemented_gates())))))
+            map(|x| -> x.implementation.path, State.implemented_gates())))))
         else   
             map(|x| -> GateRealization{path = x}, 
                 all_paths(arch, 

@@ -8,13 +8,14 @@ use tower_lsp::{Client, LanguageServer};
 use crate::ast::*;
 use crate::info::builtins;
 use crate::parser::symbols::{Type, UserDefTable};
-use crate::parser::{check_semantics, parse_file, semantics, utils};
+use crate::parser::{SemanticResult, StringLabels, check_semantics, parse_file, semantics, utils};
 
 #[derive(Debug)]
 pub struct CachedParse {
     file: AmaroFile,
     type_map: HashMap<NodeId, Type>,
     user_def_table: UserDefTable,
+    string_labels: StringLabels,
 }
 
 #[derive(Debug)]
@@ -120,7 +121,7 @@ fn format_expr_preview(expr: &Expr) -> String {
 
         ExprKind::Lambda { .. } => "|...| -> ...".to_string(),
         ExprKind::IfThenElse { .. } => "if ... then ...".to_string(),
-        ExprKind::LetBinding { name, .. } => format!("let {} = ...", name),
+        ExprKind::LetBinding { name, .. } => format!("let {} = ...", name.string),
 
         ExprKind::BinaryOp { .. } => "expr op expr".to_string(),
         ExprKind::UnaryOp { op, operand } => format!("{:?} {}", op, format_expr_preview(operand)),
@@ -306,11 +307,22 @@ fn summarize_expr_detailed(expr: &Expr, depth: usize) -> String {
             if depth < 2 {
                 format!(
                     "|{}| -> {}",
-                    params.join(", "),
+                    params
+                        .iter()
+                        .map(|s| s.string.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     summarize_expr_detailed(body, depth + 1)
                 )
             } else {
-                format!("|{}| -> ...", params.join(", "))
+                format!(
+                    "|{}| -> ...",
+                    params
+                        .iter()
+                        .map(|s| s.string.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
         }
 
@@ -340,14 +352,14 @@ fn summarize_expr_detailed(expr: &Expr, depth: usize) -> String {
             if depth == 0 {
                 format!(
                     "let {} = {}\n      in {}",
-                    name,
+                    name.string,
                     summarize_expr_detailed(value, depth + 1),
                     summarize_expr_detailed(body, depth + 1)
                 )
             } else {
                 format!(
                     "let {} = {} in {}",
-                    name,
+                    name.string,
                     summarize_expr_detailed(value, depth + 1),
                     summarize_expr_detailed(body, depth + 1)
                 )
@@ -408,13 +420,20 @@ impl Backend {
                 //     self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_summary)).await;
                 // }
 
-                let (mut semantic_errors, type_map, user_def_table) = check_semantics(&file);
+                let SemanticResult {
+                    diagnostics: mut semantic_errors,
+                    type_map,
+                    user_def_table,
+                    string_labels
+                } = check_semantics(&file);
+
                 self.parse_cache.write().await.insert(
                     uri.clone(),
                     CachedParse {
                         file,
                         type_map,
                         user_def_table,
+                        string_labels,
                     },
                 );
                 diagnostics.append(&mut semantic_errors);
@@ -452,6 +471,7 @@ impl LanguageServer for Backend {
                 }),
 
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
 
                 ..Default::default()
             },
@@ -562,20 +582,26 @@ impl LanguageServer for Backend {
 
         let guard = self.parse_cache.read().await;
 
-        let (amaro_file, type_map) = match guard.get(&uri) {
+        let (amaro_file, type_map, string_labels) = match guard.get(&uri) {
             None => return Err(Error::new(ErrorCode::InvalidRequest)),
-            Some(t) => (&t.file, &t.type_map),
+            Some(t) => (&t.file, &t.type_map, &t.string_labels),
         };
 
         // get original position of cursor. this is after the dot.
         let orig_pos = params.text_document_position_params.position;
 
+        
+
         // first, check field names.
+        // this is necessary to come before the strings for hover, since fields
+        // are also in the string_labels section.
         let hovered_field = utils::field_name_containing(amaro_file, orig_pos);
 
         if let Some((block_name, field_name, field_range)) = hovered_field {
             // need to lookup the name
-            if let Some(field_info) = builtins::field_lookup(block_name.as_str(), field_name.as_str()) {
+            if let Some(field_info) =
+                builtins::field_lookup(block_name.as_str(), field_name.as_str())
+            {
                 return Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
@@ -592,6 +618,21 @@ impl LanguageServer for Backend {
             }
         }
 
+
+        // second, check the strings for hover (for instance, the labels in
+        // lambdas)
+        let hovered_string = string_labels.get_label_info(&orig_pos);
+
+        if let Some((range, _, typ)) = hovered_string {
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: typ.to_markdown_display(),
+                }),
+                range: Some(range),
+            }));
+        }
+
         // find the largest expression containing this position before the dot
         let containing_expr = utils::smallest_expr_containing(amaro_file, orig_pos);
 
@@ -601,8 +642,8 @@ impl LanguageServer for Backend {
                 None => Ok(None),
                 Some(t) => Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::PlainText,
-                        value: format!("{}", t),
+                        kind: MarkupKind::Markdown,
+                        value: t.to_markdown_display(),
                     }),
                     range: Some(e.range),
                 })),
@@ -618,6 +659,38 @@ impl LanguageServer for Backend {
                 Ok(None) //
             }
         }
+    }
+
+    // provides the "rust analyzer" style hints for let and lambdas
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+
+        let guard = self.parse_cache.read().await;
+
+        eprintln!("Checking guard for string labels");
+
+        let string_labels = match guard.get(&uri) {
+            None => return Ok(None),
+            Some(t) => &t.string_labels,
+        };
+
+        eprintln!("Got string labels.");
+
+        let res: Vec<InlayHint> = string_labels
+            .get_all_labels_in_range(&params.range)
+            .iter()
+            .map(|elt| InlayHint {
+                position: elt.0.end,
+                label: InlayHintLabel::String(format!(": {}", elt.2)), // todo change this
+                kind: Some(InlayHintKind::TYPE),
+                text_edits: None,
+                tooltip: None,
+                padding_left: Some(true),
+                padding_right: Some(true),
+                data: None,
+            })
+            .collect();
+        Ok(Some(res))
     }
 }
 
