@@ -56,9 +56,9 @@ fn test_simple_bracket_block() {
     name = 'IonCNOT'
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 1);
-    assert_eq!(file.blocks[0].kind, "GateRealization");
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
+    assert_eq!(parse_output.file.blocks[0].kind, "GateRealization");
 }
 
 #[test]
@@ -68,8 +68,8 @@ fn test_nested_bracket_block() {
     realize_gate = map(|x| -> GateRealization{path = x}, all_paths())
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 1);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
 }
 
 #[test]
@@ -86,11 +86,11 @@ Architecture[
     name = 'test3'
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 3);
-    assert_eq!(file.blocks[0].kind, "GateRealization");
-    assert_eq!(file.blocks[1].kind, "Transition");
-    assert_eq!(file.blocks[2].kind, "Architecture");
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 3);
+    assert_eq!(parse_output.file.blocks[0].kind, "GateRealization");
+    assert_eq!(parse_output.file.blocks[1].kind, "Transition");
+    assert_eq!(parse_output.file.blocks[2].kind, "Architecture");
 }
 
 #[test]
@@ -99,9 +99,9 @@ fn test_simple_colon_block() {
     routed_gates = CX
     realize_gate = Some(value)"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 1);
-    assert_eq!(file.blocks[0].kind, "RouteInfo");
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
+    assert_eq!(parse_output.file.blocks[0].kind, "RouteInfo");
 }
 
 #[test]
@@ -113,10 +113,10 @@ fn test_colon_block_with_structs() {
 TransitionInfo:
     Transition{edge : (Location,Location)}"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 2);
-    assert_eq!(file.blocks[0].kind, "RouteInfo");
-    assert_eq!(file.blocks[1].kind, "TransitionInfo");
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 2);
+    assert_eq!(parse_output.file.blocks[0].kind, "RouteInfo");
+    assert_eq!(parse_output.file.blocks[1].kind, "TransitionInfo");
 }
 
 #[test]
@@ -132,8 +132,8 @@ Transition[
     cost = 1.0
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 3);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 3);
 }
 
 #[test]
@@ -162,8 +162,8 @@ ArchInfo:
 StateInfo:
     cost = 1.0"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 4);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 4);
 }
 
 #[test]
@@ -197,10 +197,10 @@ fn test_lambda_expression() {
     let input = r#"RouteInfo:
     realize_gate = map(|x| -> GateRealization{path = x}, all_paths())"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 1);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "realize_gate");
         if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
@@ -217,9 +217,9 @@ fn test_if_then_else_expression() {
     let input = r#"TransitionInfo:
     cost = if x == y then 0.0 else 1.0"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
     }
@@ -230,9 +230,9 @@ fn test_let_binding_expression() {
     let input = r#"TransitionInfo:
     cost = let foo = 1.0 in foo"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert!(matches!(field.value.kind, ExprKind::LetBinding { .. }));
     }
@@ -243,9 +243,9 @@ fn test_field_access() {
     let input = r#"RouteInfo:
     value = State.map[Gate.qubits[0]]"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert!(matches!(field.value.kind, ExprKind::IndexAccess { .. }));
     }
@@ -256,9 +256,9 @@ fn test_tuple_projection() {
     let input = r#"TransitionInfo:
     value = Transition.edge.(0)"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert!(matches!(field.value.kind, ExprKind::Projection { .. }));
     }
@@ -269,9 +269,9 @@ fn test_struct_literal() {
     let input = r#"RouteInfo:
     realize_gate = GateRealization{u = loc1, v = loc2}"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::StructLiteral { name, fields } = &field.value.kind {
             assert_eq!(name, "GateRealization");
@@ -287,9 +287,9 @@ fn test_comparison_operators() {
     let input = r#"TransitionInfo:
     cost = if edge == Location(0, 0) then 0.0 else 1.0"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::IfThenElse { condition, .. } = &field.value.kind {
             assert!(matches!(condition.kind, ExprKind::BinaryOp { .. }));
@@ -323,14 +323,14 @@ Architecture[
     name = 'IonArch'
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 3);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 3);
 }
 
 #[test]
 fn test_empty_file() {
-    let file = parse_file("").unwrap();
-    assert_eq!(file.blocks.len(), 0);
+    let parse_output = parse_file("").unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 0);
 }
 
 #[test]
@@ -341,8 +341,8 @@ GateRealization[
     name = 'test'
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 1);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
 }
 
 #[test]
@@ -360,10 +360,10 @@ Transition[
     name = 'also valid'
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 2);
-    assert_eq!(file.blocks[0].kind, "GateRealization");
-    assert_eq!(file.blocks[1].kind, "Transition");
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 2);
+    assert_eq!(parse_output.file.blocks[0].kind, "GateRealization");
+    assert_eq!(parse_output.file.blocks[1].kind, "Transition");
 }
 
 #[test]
@@ -372,27 +372,27 @@ fn test_all_rust_block_positions() {
     let input1 = r#"{{ fn test() { qubit: Type } }}
 GateRealization[name='test']"#;
     let result1 = parse_file(input1).unwrap();
-    assert_eq!(result1.blocks.len(), 1);
+    assert_eq!(result1.file.blocks.len(), 1);
 
     // Rust block between blocks
     let input2 = r#"GateRealization[name='a']
 {{ fn test() { qubit: Type } }}
 Transition[name='b']"#;
     let result2 = parse_file(input2).unwrap();
-    assert_eq!(result2.blocks.len(), 2);
+    assert_eq!(result2.file.blocks.len(), 2);
 }
 
 #[test]
 fn test_whitespace_only() {
-    let file = parse_file("   \n\n   ").unwrap();
-    assert_eq!(file.blocks.len(), 0);
+    let parse_output = parse_file("   \n\n   ").unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 0);
 }
 
 #[test]
 fn test_windows_line_endings() {
     let input = "RouteInfo:\r\n  routed_gates = CX\r\n\r\nTransitionInfo:\r\n  data = test";
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 2);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 2);
 }
 
 #[test]
@@ -401,8 +401,8 @@ fn test_file_no_trailing_newline() {
     name = 'test'
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 1);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
 }
 
 #[test]
@@ -413,10 +413,10 @@ GateRealization[name='test']
 qubit: *aod_qubit,
 }}
 "#;
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
     // Should find GateRealization, but IGNORE the rust block contents
-    assert_eq!(file.blocks.len(), 1);
-    assert_eq!(file.blocks[0].kind, "GateRealization");
+    assert_eq!(parse_output.file.blocks.len(), 1);
+    assert_eq!(parse_output.file.blocks[0].kind, "GateRealization");
 }
 
 #[test]
@@ -432,9 +432,9 @@ GateRealization[
 ]"#;
     let result = parse_file(input);
     assert!(result.is_ok());
-    let file = result.unwrap();
-    assert_eq!(file.blocks.len(), 1);
-    assert_eq!(file.blocks[0].kind, "GateRealization");
+    let parse_output = result.unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
+    assert_eq!(parse_output.file.blocks[0].kind, "GateRealization");
 }
 
 #[test]
@@ -449,12 +449,12 @@ TransitionInfo:
     apply = identity
 "#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
     let mut ids = std::collections::HashSet::new();
 
-    ids.insert(file.id);
-    for block in &file.blocks {
+    ids.insert(parse_output.file.id);
+    for block in &parse_output.file.blocks {
         ids.insert(block.id);
         let BlockContent::Fields(items) = &block.content;
         for item in items {
@@ -483,10 +483,10 @@ fn test_multiline_if_then_else() {
         then result1
         else result2"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 1);
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     assert_eq!(items.len(), 1);
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "realize_gate");
@@ -503,9 +503,9 @@ fn test_multiline_if_with_complex_condition() {
         then Some(GateRealization{u = State.map[Gate.qubits[0]]})
         else None"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "realize_gate");
         if let ExprKind::IfThenElse {
@@ -531,9 +531,9 @@ fn test_multiline_let_binding() {
             else 1.0
         in foo"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "cost");
         assert!(matches!(field.value.kind, ExprKind::LetBinding { .. }));
@@ -547,9 +547,9 @@ fn test_multiline_lambda() {
         -> GateRealization{path = x}, 
         all_paths())"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "realize_gate");
         if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
@@ -570,9 +570,9 @@ fn test_deeply_nested_multiline_expression() {
             map(|y| -> GateRealization{path = y},
                 other_paths())"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     assert_eq!(items.len(), 1);
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "realize_gate");
@@ -589,9 +589,9 @@ fn test_multiline_with_comments() {
         then result1  // First option
         else result2  // Second option"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "realize_gate");
         assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
@@ -604,9 +604,9 @@ fn test_comma_separated_gates_no_brackets() {
     routed_gates = CX, T
     realize_gate = Some(value)"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "routed_gates");
         // Should parse as a List even without brackets
@@ -633,8 +633,8 @@ fn test_comma_separated_vs_bracket_list_equivalence() {
     let file1 = parse_file(input_no_brackets).unwrap();
     let file2 = parse_file(input_brackets).unwrap();
 
-    let BlockContent::Fields(items1) = &file1.blocks[0].content;
-    let BlockContent::Fields(items2) = &file2.blocks[0].content;
+    let BlockContent::Fields(items1) = &file1.file.blocks[0].content;
+    let BlockContent::Fields(items2) = &file2.file.blocks[0].content;
 
     let field1 = items1.first().unwrap();
     let field2 = items2.first().unwrap();
@@ -674,8 +674,8 @@ RouteInfo:
     apply = if (Gate.gate_type) == CX then DoSomething else Skip
 "#;
 
-    let file = parse_file(input).expect("Should parse valid if-expression");
-    let expr = get_first_field_value(file);
+    let parse_output = parse_file(input).expect("Should parse valid if-expression");
+    let expr = get_first_field_value(parse_output.file);
 
     if let ExprKind::IfThenElse { condition, .. } = expr.kind {
         match condition.kind {
@@ -697,8 +697,8 @@ RouteInfo:
             == 
             CX
 "#;
-    let file = parse_file(input).expect("Should handle newlines in binary ops");
-    let expr = get_first_field_value(file);
+    let parse_output = parse_file(input).expect("Should handle newlines in binary ops");
+    let expr = get_first_field_value(parse_output.file);
 
     match expr.kind {
         ExprKind::BinaryOp { op, .. } => assert_eq!(op, BinaryOperator::Eq),
@@ -728,8 +728,8 @@ fn test_nested_logic_parens() {
 RouteInfo:
     val = (A == B) && (C != D)
 "#;
-    let file = parse_file(input).expect("Should parse nested logic");
-    let expr = get_first_field_value(file);
+    let parse_output = parse_file(input).expect("Should parse nested logic");
+    let expr = get_first_field_value(parse_output.file);
 
     match expr.kind {
         ExprKind::BinaryOp { op, .. } => assert_eq!(op, BinaryOperator::And),
@@ -743,8 +743,8 @@ fn test_simple_dot_access() {
 RouteInfo:
     val = State.map
 "#;
-    let file = parse_file(input).expect("Should parse dot access");
-    let expr = get_first_field_value(file);
+    let parse_output = parse_file(input).expect("Should parse dot access");
+    let expr = get_first_field_value(parse_output.file);
 
     match expr.kind {
         ExprKind::FieldAccess { field, .. } => assert_eq!(field, "map"),
@@ -759,8 +759,8 @@ RouteInfo:
     val = x.implementation.(path())
 "#;
 
-    let file = parse_file(input).expect("Should parse dot-expression syntax");
-    let expr = get_first_field_value(file);
+    let parse_output = parse_file(input).expect("Should parse dot-expression syntax");
+    let expr = get_first_field_value(parse_output.file);
     println!("Parsed: {:?}", expr);
 }
 
@@ -783,8 +783,8 @@ fn test_function_call_parsing() {
 RouteInfo:
     x = all_paths(arch, 10)
 "#;
-    let file = parse_file(input).expect("Should parse function call");
-    let expr = get_first_field_value(file);
+    let parse_output = parse_file(input).expect("Should parse function call");
+    let expr = get_first_field_value(parse_output.file);
 
     if let ExprKind::FunctionCall { args, .. } = expr.kind {
         assert_eq!(args.len(), 2);
@@ -799,8 +799,8 @@ fn test_comma_separated_list_no_brackets() {
 RouteInfo:
     routed_gates = CX, T
 "#;
-    let file = parse_file(input).expect("Should parse list");
-    let expr = get_first_field_value(file);
+    let parse_output = parse_file(input).expect("Should parse list");
+    let expr = get_first_field_value(parse_output.file);
 
     if let ExprKind::List(items) = expr.kind {
         assert_eq!(items.len(), 2);
@@ -814,9 +814,9 @@ fn test_comparison_in_if_condition() {
     let input = r#"RouteInfo:
     realize_gate = if (Gate.gate_type()) == CX then Some(result) else None"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::IfThenElse { condition, .. } = &field.value.kind {
             if let ExprKind::BinaryOp { op, left, right } = &condition.kind {
@@ -837,9 +837,9 @@ fn test_nested_comparisons() {
     let input = r#"TransitionInfo:
     cost = if x == y && a < b then 1.0 else 0.0"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::IfThenElse { condition, .. } = &field.value.kind {
             if let ExprKind::BinaryOp { op, left, right } = &condition.kind {
@@ -872,9 +872,9 @@ fn test_parenthesized_comparison() {
     let input = r#"RouteInfo:
     value = if (x == y) then true else false"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::IfThenElse { condition, .. } = &field.value.kind {
             assert!(matches!(
@@ -895,9 +895,9 @@ fn test_newline_before_then() {
         then result
         else 0"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     assert_eq!(items.len(), 1, "Should parse exactly one field");
     if let Some(BlockItem::Field(field)) = items.first() {
         assert_eq!(field.key, "realize_gate");
@@ -911,9 +911,9 @@ fn test_newline_before_else() {
     cost = if x == y then 1.0
         else 0.0"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert!(matches!(field.value.kind, ExprKind::IfThenElse { .. }));
     }
@@ -925,9 +925,9 @@ fn test_newline_before_arrow_in_lambda() {
     realize_gate = map(|x|
         -> result, list)"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
             assert!(matches!(args[0].kind, ExprKind::Lambda { .. }));
@@ -941,9 +941,9 @@ fn test_newline_before_in_keyword() {
     cost = let x = 1.0
         in x"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert!(matches!(field.value.kind, ExprKind::LetBinding { .. }));
     }
@@ -955,9 +955,9 @@ fn test_generic_type_in_struct_def() {
     GateRealization{path : Vec<Location>}
     realize_gate = Some(value)"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::StructDef(struct_def)) = items.first() {
         assert_eq!(struct_def.name, "GateRealization");
         assert_eq!(struct_def.fields.len(), 1);
@@ -979,9 +979,9 @@ fn test_nested_generics() {
     Arch{rates : Vec<Vec<Float>>}
     get_locations = []"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::StructDef(struct_def)) = items.first() {
         let param = &struct_def.fields[0];
         // Should be Vec<Vec<Float>>
@@ -1002,9 +1002,9 @@ fn test_method_chain_with_projection() {
     let input = r#"TransitionInfo:
     value = x.implementation.(path())"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert!(matches!(field.value.kind, ExprKind::IndexAccess { .. }));
     }
@@ -1015,9 +1015,9 @@ fn test_chained_field_and_method_calls() {
     let input = r#"RouteInfo:
     value = obj.field1.method1().field2.method2(arg)"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         assert!(matches!(field.value.kind, ExprKind::FunctionCall { .. }));
     }
@@ -1028,9 +1028,9 @@ fn test_multiple_projections() {
     let input = r#"TransitionInfo:
     value = tuple.(0).(1)"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::Projection { tuple, index } = &field.value.kind {
             assert_eq!(*index, 1);
@@ -1046,9 +1046,9 @@ fn test_complex_chaining() {
     let input = r#"RouteInfo:
     value = map(|x| -> x.implementation.(path()), gates())"#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
             if let ExprKind::Lambda { body, .. } = &args[0].kind {
@@ -1065,9 +1065,9 @@ fn test_infer_bin_op() {
     name = 'IonCNOT'
 ]"#;
 
-    let file = parse_file(input).unwrap();
-    assert_eq!(file.blocks.len(), 1);
-    assert_eq!(file.blocks[0].kind, "GateRealization");
+    let parse_output = parse_file(input).unwrap();
+    assert_eq!(parse_output.file.blocks.len(), 1);
+    assert_eq!(parse_output.file.blocks[0].kind, "GateRealization");
 }
 
 #[test]
@@ -1077,8 +1077,8 @@ fn test_match_expression_basic() {
         | CX -> 1
         | T -> 2"#;
 
-    let file = parse_file(input).unwrap();
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let parse_output = parse_file(input).unwrap();
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::Match { scrutinee, arms } = &field.value.kind {
             assert!(matches!(scrutinee.kind, ExprKind::Identifier(_)));
@@ -1098,8 +1098,8 @@ fn test_match_expression_with_wildcard() {
         | CX -> 1
         | _ -> 0"#;
 
-    let file = parse_file(input).unwrap();
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let parse_output = parse_file(input).unwrap();
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::Match { arms, .. } = &field.value.kind {
             assert_eq!(arms.len(), 2);

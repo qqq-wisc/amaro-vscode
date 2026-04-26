@@ -32,8 +32,8 @@ pub fn diags_no_errors(diags: &Vec<Diagnostic>) -> bool {
 #[test]
 fn capitalization_warning() {
     let input = format!("{}\narchitecture[name='test']", MOCK_MANDATORY_BLOCKS);
-    let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(&input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let cap_errors: Vec<_> = diags
         .iter()
@@ -51,8 +51,8 @@ fn capitalization_warning() {
 #[test]
 fn no_warning_for_correct_capitalization() {
     let input = format!("{}\nArchitecture[name='test']", MOCK_MANDATORY_BLOCKS);
-    let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(&input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let cap_errors: Vec<_> = diags
         .iter()
@@ -69,8 +69,8 @@ fn no_warning_for_correct_capitalization() {
 fn test_all_valid_no_errors() {
     let input = MOCK_MANDATORY_BLOCKS;
 
-    let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(&input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     assert!(
         diags_no_errors(&diags),
@@ -83,8 +83,8 @@ fn test_all_valid_no_errors() {
 fn test_missing_mandatory_blocks() {
     // Only Architecture, missing RouteInfo and TransitionInfo
     let input = "Architecture[name='test']";
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     assert!(
         diags
@@ -112,8 +112,8 @@ RouteInfo:
     realize_gate = []
     "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     assert_eq!(
         diags.len(),
@@ -140,8 +140,8 @@ RouteInfo:
     realize_gate = []
     "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     assert_eq!(diags.len(), 2, "Should have 2 errors: duplicate + missing");
 
@@ -168,8 +168,8 @@ TransitionInfo:
     apply = identity_application(step)
 "#;
 
-    let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(&input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -201,19 +201,19 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
+    let parse_output = parse_file(input).unwrap();
 
     // Verify struct defs are parsed
-    assert_eq!(file.blocks.len(), 2);
+    assert_eq!(parse_output.file.blocks.len(), 2);
 
-    let BlockContent::Fields(items) = &file.blocks[0].content;
+    let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     let has_struct = items
         .iter()
         .any(|item| matches!(item, BlockItem::StructDef(_)));
     assert!(has_struct, "RouteInfo should contain a struct definition");
 
     // Should still pass semantic checks
-    let diags = check_semantics(&file).diagnostics;
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -235,8 +235,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let warnings: Vec<_> = diags
         .iter()
@@ -270,8 +270,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let warnings: Vec<_> = diags
         .iter()
@@ -308,8 +308,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let warnings: Vec<_> = diags
         .iter()
@@ -333,8 +333,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let warnings: Vec<_> = diags
         .iter()
@@ -374,8 +374,8 @@ fn test_semantic_checks_work_with_bracket_syntax() {
     ]
     "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     assert!(
         diags_no_errors(&diags),
         "Semantics should work for Bracket syntax too"
@@ -394,8 +394,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -423,8 +423,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -451,8 +451,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -478,8 +478,8 @@ TransitionInfo:
     apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     get_transitions = []
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -506,8 +506,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -533,8 +533,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -560,8 +560,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -595,8 +595,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -622,8 +622,8 @@ TransitionInfo:
     get_transitions = []
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let errors: Vec<_> = diags
         .iter()
@@ -644,8 +644,8 @@ TransitionInfo:
     apply = identity_application(step)
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let undefined_errors: Vec<_> = diags
         .iter()
@@ -670,8 +670,8 @@ TransitionInfo:
     apply = identity_application(step)
 "#;
 
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let undefined_errors: Vec<_> = diags
         .iter()
@@ -694,8 +694,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -719,8 +719,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -746,8 +746,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -773,8 +773,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -801,8 +801,8 @@ TransitionInfo:
     apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -825,8 +825,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -849,8 +849,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let has_error = diags
         .iter()
         .any(|d| d.message.to_lowercase().contains("bool"));
@@ -874,8 +874,8 @@ TransitionInfo:
     apply = value_swap(Transition.edge, Location(0))
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let has_type_error = diags
         .iter()
         .any(|d| d.severity == Some(DiagnosticSeverity::ERROR));
@@ -898,8 +898,8 @@ TransitionInfo:
     apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -923,8 +923,8 @@ TransitionInfo:
     apply = Transition.nonexistent
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let has_field_warning = diags.iter().any(|d| {
         d.message.to_lowercase().contains("nonexistent")
             || d.message.to_lowercase().contains("no field")
@@ -946,8 +946,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = true
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let has_cost_error = diags
         .iter()
         .any(|d| d.message.contains("cost") && d.message.to_lowercase().contains("float"));
@@ -969,8 +969,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 1.5
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let cost_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("cost"))
@@ -994,8 +994,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let cost_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("cost"))
@@ -1018,8 +1018,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 'oops'
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let has_cost_error = diags
         .iter()
         .any(|d| d.message.contains("cost") && d.message.to_lowercase().contains("float"));
@@ -1043,8 +1043,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 1.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let has_debug_artifact = diags.iter().any(|d| d.message.contains("Box("));
     assert!(
         !has_debug_artifact,
@@ -1065,8 +1065,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 1.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let has_debug_artifact = diags.iter().any(|d| d.message.contains("Box("));
     assert!(
         !has_debug_artifact,
@@ -1087,8 +1087,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 1.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1112,8 +1112,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = -1
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1142,8 +1142,8 @@ GateRealization:
     Transition{edge : (Location, Location)}
     data = Transition.edge.(0)
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Transition'"))
@@ -1167,8 +1167,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef_arch: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Arch'"))
@@ -1192,8 +1192,8 @@ TransitionInfo:
     apply = Arch.trap_edges
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef_arch: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable 'Arch'"))
@@ -1216,8 +1216,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined") || d.message.contains("non-function"))
@@ -1243,8 +1243,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined") || d.message.contains("non-function"))
@@ -1269,8 +1269,8 @@ TransitionInfo:
     apply = return []
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let missing_apply = diags
         .iter()
@@ -1303,8 +1303,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     let return_diag = diags
         .iter()
@@ -1334,8 +1334,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1360,8 +1360,8 @@ TransitionInfo:
     apply = Step.gates()
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef_step: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable") && d.message.contains("Step"))
@@ -1385,8 +1385,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     // No errors should occur in a valid file — 'step' being Int is an internal guarantee
     let errors: Vec<_> = diags
         .iter()
@@ -1410,8 +1410,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1435,8 +1435,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = max(min(1, 2), abs(0))
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1465,8 +1465,8 @@ TransitionInfo:
 //     apply = consistent([], State.map())
 //     cost = 0.0
 // "#;
-//     let file = parse_file(input).unwrap();
-//     let diags = check_semantics(&file).diagnostics;
+//     let parse_output = parse_file(input).unwrap();
+//     let diags = check_semantics(&parse_output.file).diagnostics;
 //     let undef: Vec<_> = diags
 //         .iter()
 //         .filter(|d| d.message.contains("Undefined variable 'consistent'"))
@@ -1490,8 +1490,8 @@ TransitionInfo:
     apply = identity_application(step)
     cost = max(0, abs(0))
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let undef_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Undefined variable"))
@@ -1517,8 +1517,8 @@ TransitionInfo:
     apply = identity_application(step)
     get_transitions = []
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -1544,8 +1544,8 @@ TransitionInfo:
         | _ -> []
     get_transitions = []
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let keyword_errors: Vec<_> = diags
         .iter()
         .filter(|d| {
@@ -1574,8 +1574,8 @@ TransitionInfo:
 "#;
     // If is_keyword works correctly, fields named 'match' or 'with' would be rejected.
     // Just verify the valid file above parses and validates cleanly.
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))

@@ -1,8 +1,7 @@
-// Place for defining built-in keywords and functions. This means "raw" functions like
-// map, but also functions like .contains on a Vec. Also just types too, like Arch.
-// The SymbolTable should derive from this, along with everything else.
-// No hard-coding should take place except for in here.
-// Then, if later plans change about the types, only this needs to be modified.
+/// Place for defining built-in keywords and functions. This means "raw" functions like
+/// map, but also functions like .contains on a Vec. Also just types too, like Arch.
+/// No hard-coding of built-in functions should take place except for in here.
+/// Then, if later plans change about the types, only this needs to be modified.
 
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, MarkupContent,
@@ -21,218 +20,15 @@ pub enum Owner<'a, T> {
 
 /// Global, persistent location where the built-ins are kept. They do not change
 /// between different files.
-static GLOBAL: OnceLock<Vec<(Option<Type>, Vec<BuiltIn>)>> = OnceLock::new();
-static FIELDS: OnceLock<Vec<FieldInfo>> = OnceLock::new();
+static BUILTINS: OnceLock<Vec<(Option<Type>, Vec<BuiltIn>)>> = OnceLock::new();
 
-/// Struct for recognizing the types of fields, such as that "cost" allows
-/// for using "Transition" and requires a value of "Float"
-#[derive(Debug)]
-pub struct FieldInfo {
-    /// The string name of the block that this field should reside in.
-    /// For instance, "TransitionInfo".
-    pub block_name: String,
-    /// The string name of the field. For instance, "cost".
-    pub field_name: String,
-    /// Human-readable information about the field.
-    pub info: String,
-    /// The type of the field. ALWAYS a function.
-    pub typ: Type,
-}
-
-impl FieldInfo {
-    pub fn show_details(&self) -> String {
-        let mut type_to_show: &Type = &self.typ;
-        if let Type::Function {
-            params,
-            return_type,
-        } = &self.typ
-        {
-            // if no params, just put return type
-            if params.is_empty() {
-                type_to_show = return_type;
-            }
-        }
-
-        format!(
-            "## {}\n *In block {}*\n\n{}\n\n{}",
-            self.field_name,
-            self.block_name,
-            type_to_show.to_markdown_display(),
-            self.info
-        )
-    }
-}
-
-fn init_fields() -> Vec<FieldInfo> {
-    // order doesn't matter
-    vec![
-        FieldInfo {
-            block_name: "ArchInfo".to_string(),
-            field_name: "get_locations".to_string(),
-            info: "".to_string(), // TODO info for this
-            typ: Type::Function {
-                params: Vec::new(), // TODO not sure what to put here
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        },
-        FieldInfo {
-            block_name: "StateInfo".to_string(),
-            field_name: "cost".to_string(),
-            info: "Cost".to_string(), // TODO info for this
-            typ: Type::Function {
-                params: Vec::new(), // TODO not sure what to put here
-                return_type: Box::new(Type::Float),
-            },
-        },
-        FieldInfo {
-            block_name: "TransitionInfo".to_string(),
-            field_name: "cost".to_string(),
-            info: "Cost of transitions".to_string(),
-            typ: Type::Function {
-                params: vec![Type::UserDef("Transition".to_string())],
-                return_type: Box::new(Type::Float),
-            },
-        },
-        FieldInfo {
-            block_name: "RouteInfo".to_string(),
-            field_name: "realize_gate".to_string(),
-            info: "".to_string(), // TODO details
-            typ: Type::Function {
-                params: vec![Type::ArchT, Type::StateT, Type::Gate],
-                return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
-                    "GateRealization".to_string(),
-                )))),
-            },
-        },
-        FieldInfo {
-            block_name: "TransitionInfo".to_string(),
-            field_name: "get_transitions".to_string(),
-            info: "".to_string(), // TODO details
-            typ: Type::Function {
-                params: vec![Type::ArchT, Type::StateT],
-                return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))),
-            },
-        },
-        FieldInfo {
-            block_name: "TransitionInfo".to_string(),
-            field_name: "apply".to_string(),
-            info: "".to_string(), // TODO details
-            typ: Type::Function {
-                params: vec![Type::QubitMap, Type::UserDef("Transition".to_string())],
-                return_type: Box::new(Type::QubitMap),
-            },
-        },
-        FieldInfo {
-            block_name: "RouteInfo".to_string(),
-            field_name: "routed_gates".to_string(),
-            info: "".to_string(), // TODO details
-            typ: Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Vec(Box::new(Type::Gate))),
-            },
-        },
-    ]
-}
-
-pub fn field_lookup(block_name: &str, field_name: &str) -> Option<&'static FieldInfo> {
-    let data = FIELDS.get_or_init(init_fields);
-
-    data.iter()
-        .find(|elt| elt.block_name == block_name && elt.field_name == field_name)
-}
-
-/// Given a type from the built-in, makes the generics inside it unique.
-pub fn make_generics_unique(typ: &mut Type, next_generic_num: &mut FetchAndAdd<u8>) {
-    let mut generic_set: HashSet<u8> = HashSet::new();
-    generic_visitor(typ, &mut generic_set);
-
-    if generic_set.is_empty() {
-        return; // nothing else to do
-    }
-
-    // ok great. now, devise generic shifts.
-    // maps from previos value to new value
-    let generic_shifts: HashMap<u8, u8> = generic_set
-        .iter()
-        .map(|elt| (*elt, next_generic_num.fetch_and_add()))
-        .collect();
-
-    // now finally, apply these shifts.
-    generic_shift_applicator(typ, &generic_shifts);
-}
-/// Visits a type, and identifies all the generics inside.
-fn generic_visitor(typ: &Type, set: &mut HashSet<u8>) {
-    match typ {
-        Type::Int
-        | Type::Float
-        | Type::Bool
-        | Type::String
-        | Type::Location
-        | Type::Qubit
-        | Type::QubitMap
-        | Type::Gate
-        | Type::ArchT
-        | Type::StateT
-        | Type::InstrT
-        | Type::UserDef(_)
-        | Type::Unknown => { /* do nothing */ }
-        Type::Vec(inner) => generic_visitor(inner, set),
-        Type::Tuple(items) => items.iter().for_each(|elt| generic_visitor(elt, set)),
-        Type::Option(inner) => generic_visitor(inner, set),
-        Type::Function {
-            params,
-            return_type,
-        } => {
-            params.iter().for_each(|elt| generic_visitor(elt, set));
-            generic_visitor(return_type, set);
-        }
-        Type::Generic(c) => {
-            set.insert(*c);
-        }
-    }
-}
-
-fn generic_shift_applicator(typ: &mut Type, shifts: &HashMap<u8, u8>) {
-    match typ {
-        Type::Int
-        | Type::Float
-        | Type::Bool
-        | Type::String
-        | Type::Location
-        | Type::Qubit
-        | Type::QubitMap
-        | Type::Gate
-        | Type::ArchT
-        | Type::StateT
-        | Type::InstrT
-        | Type::UserDef(_)
-        | Type::Unknown => { /* do nothing */ }
-        Type::Vec(inner) => generic_shift_applicator(inner, shifts),
-        Type::Tuple(items) => items
-            .iter_mut()
-            .for_each(|elt| generic_shift_applicator(elt, shifts)),
-        Type::Option(inner) => generic_shift_applicator(inner, shifts),
-        Type::Function {
-            params,
-            return_type,
-        } => {
-            params
-                .iter_mut()
-                .for_each(|elt| generic_shift_applicator(elt, shifts));
-            generic_shift_applicator(return_type, shifts);
-        }
-        Type::Generic(c) => {
-            *typ = Type::Generic(*shifts.get(c).unwrap());
-        }
-    }
-}
 
 /// Given an identifier, gets the "raw" built-in associated with it.
 /// A "raw" built-in is something (usually a function) that is pre-defined
-/// and does not deal with any "indexing". For instace, value_swap is a
-/// raw built-in.
+/// and does not deal with any "indexing". For instance, something like the
+/// abs() or max() functions would be raw built-ins.
 pub fn get_raw_built_in(identifier: &str) -> Option<&BuiltIn> {
-    let data = GLOBAL.get_or_init(init_global);
+    let data = BUILTINS.get_or_init(init_builtins);
 
     // TODO write test that ensures .unwrap always works.
     data.iter()
@@ -243,13 +39,13 @@ pub fn get_raw_built_in(identifier: &str) -> Option<&BuiltIn> {
         .find(|elt| elt.identifier == identifier)
 }
 
-/// Gets all "raw" built-ins. Useful for providing suggestions.
+/// Gets every single "raw" built-in. Useful for providing suggestions.
 /// A "raw" built-in is something (usually a function) that is pre-defined
-/// and does not deal with any "indexing". For instace, value_swap is a
-/// raw built-in.
+/// and does not deal with any "indexing". For instance, something like the
+/// abs() or max() functions would be raw built-ins.
 pub fn get_all_raw_built_ins() -> Vec<&'static BuiltIn> {
     // note the static lifetime
-    let data = GLOBAL.get_or_init(init_global);
+    let data = BUILTINS.get_or_init(init_builtins);
     data.iter()
         .find(|elt| elt.0.is_none())
         .unwrap()
@@ -258,13 +54,21 @@ pub fn get_all_raw_built_ins() -> Vec<&'static BuiltIn> {
         .collect()
 }
 
-/// Gets all the built-ins that come after a type.
-/// For instance, if the type is Vec, then it will give the built-ins for the
-/// contains, push, pop, etc functions.
-///
-/// TODO this is awkward with generics.
+/// Gets all the built-ins that come after a type. Good for suggestions.
+/// For instance, if the type is Vec, then this gives the built-ins for the
+/// contains, push, and pop functions, along with the others.
+/// 
+/// This DOES convert to generic types. Meaning, if the given type is Vec<Gate>,
+/// then the contains, push, and pop functions will provide built-in information
+/// with the proper typing.
+/// 
+/// Notice the output type is Option<Owner<Vec<BuiltIn>>>
+/// Option -> might not have any built-ins after the type
+/// Owner -> if there are no generics, then the Vec can be borrowed from the
+/// static built-ins list without doing unnecessary allocations. otherwise,
+/// needs to pass an owned list with allocations
 pub fn get_all_built_ins_after_type(t1: &Type) -> Option<Owner<'static, Vec<BuiltIn>>> {
-    let data = GLOBAL.get_or_init(init_global);
+    let data = BUILTINS.get_or_init(init_builtins);
 
     // if type has generics, then we need to be able to understand this.
     let res: Option<(&Vec<BuiltIn>, GenericTable)> =
@@ -295,15 +99,14 @@ pub fn get_all_built_ins_after_type(t1: &Type) -> Option<Owner<'static, Vec<Buil
                 Some(Owner::Owned(
                     pair.0
                         .iter()
-                        .filter_map(|elt| match semantics::degenerisize(&elt.typ, &pair.1) {
-                            (false, _) => None, // failed to degenerisize
-                            (_, true_type) => Some(BuiltIn {
+                        .map(|elt| 
+                            BuiltIn {
                                 parent_type: elt.parent_type.clone(),
                                 identifier: elt.identifier.clone(),
-                                typ: true_type,
+                                typ: pair.1.try_degenerisize(&elt.typ),
                                 details: elt.details.clone(),
-                            }),
-                        })
+                            }
+                        )
                         .collect(),
                 ))
             }
@@ -315,9 +118,18 @@ pub fn get_all_built_ins_after_type(t1: &Type) -> Option<Owner<'static, Vec<Buil
 /// For instance, if t1 is Arch and identifier is width, check if Arch.width
 /// is a valid built-in (which, it is!). If it is, provides the BuiltIn info.
 /// Otherwise, gives None.
-/// Handles generics, giving the proper type.
+/// 
+/// This DOES convert to generic types. Meaning, if the given type is Vec<Gate>,
+/// then the contains, push, and pop functions will provide built-in information
+/// with the proper typing.
+/// 
+/// Notice the output type is Option<Owner<BuiltIn>>
+/// Option -> might not have any built-ins after the type
+/// Owner -> if there are no generics, then the BuiltIn can be borrowed from the
+/// static built-ins list without doing unnecessary allocations. otherwise,
+/// needs to pass an owned list with allocations
 pub fn check_built_in_after_type(t1: &Type, identifier: &str) -> Option<Owner<'static, BuiltIn>> {
-    let data = GLOBAL.get_or_init(init_global);
+    let data = BUILTINS.get_or_init(init_builtins);
 
     match data.iter().filter(|elt| elt.0.is_some()).find_map(|elt| {
         let mut generic_table = GenericTable::new();
@@ -336,25 +148,29 @@ pub fn check_built_in_after_type(t1: &Type, identifier: &str) -> Option<Owner<'s
                     if !table.is_dirty() {
                         Owner::Borrowed(found)
                     } else {
-                        match semantics::degenerisize(&found.typ, &table) {
-                            (false, _) => Owner::Borrowed(found), // This case is a fall back if something goes wrong
-                            // LS: Investigate this case and see if it's needed or what we could
-                            // maybe do about it.
-                            (_, degenerisized_type) => Owner::Owned(BuiltIn {
-                                parent_type: Some(t1.clone()),
-                                identifier: identifier.to_string(),
-                                typ: degenerisized_type,
-                                details: found.details.clone(),
-                            }),
-                        }
+                        Owner::Owned(BuiltIn {
+                            parent_type: Some(t1.clone()),
+                            identifier: identifier.to_string(),
+                            typ: table.try_degenerisize(&found.typ),
+                            details: found.details.clone(),
+                        })
                     }
                 })
         }
     }
 }
 
-/// Run this in get_or_init
-fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
+/// Run this in get_or_init, as this should only be ran once.
+/// This will initialize the static built-ins vec.
+/// If the signature of a built-in changes, modify this function.
+/// The structure of the return type:
+/// Each entry has two parts: First part is an optional "parent" type, second
+/// part is a vec of built-ins that come after this parent type.
+/// For instance, if the parent type is Vec, then the built-in could be
+/// something like the ".contains" function.
+/// If the parent type is None, then the built-in could be something like
+/// the "max" or "abs" function.
+fn init_builtins() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
     vec![
         (None, vec![
         // type keywords
@@ -938,6 +754,7 @@ fn init_global() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
 
 /// DO NOT IMPLEMENT CLONE OR COPY.
 /// THIS SHOULD NOT BE CLONED OR COPIED.
+/// if you think a BuiltIn should be cloned or copied, you are using it wrong!
 #[derive(Debug, PartialEq)]
 pub struct BuiltIn {
     pub parent_type: Option<Type>, // redundant. remove this extra info
@@ -947,6 +764,9 @@ pub struct BuiltIn {
 }
 
 impl BuiltIn {
+    /// Converts from a built-in to a completion item.
+    /// A completion item is something that is displayable within the extension
+    /// during autocomplete.
     pub fn to_completion_item(
         &self,
         additional_text_edits: Option<Vec<tower_lsp::lsp_types::TextEdit>>,
@@ -968,6 +788,7 @@ impl BuiltIn {
         }
     }
 
+    /// Helper for to_completion_item
     fn to_sort_string(&self) -> String {
         match self.typ {
             Type::Function { .. } => format!("a{}", self.identifier),
@@ -975,6 +796,7 @@ impl BuiltIn {
         }
     }
 
+    /// Helper for to_completion_item
     fn type_to_completion_item_kind(typ: &Type) -> CompletionItemKind {
         match typ {
             Type::Int => CompletionItemKind::FIELD,
@@ -998,6 +820,7 @@ impl BuiltIn {
         }
     }
 
+    /// Helper for to_completion_item
     fn get_completion_item_label_details(typ: &Type) -> CompletionItemLabelDetails {
         CompletionItemLabelDetails {
             detail: match typ {
@@ -1011,6 +834,7 @@ impl BuiltIn {
         }
     }
 
+    /// Helper for to_completion_item
     fn get_completion_item_detail(typ: &Type, details: &str) -> String {
         format!("{}\n\n{}", typ, details)
     }
@@ -1477,59 +1301,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_field_lookup() {
-        if let Some(e) = field_lookup("nothing", "total garbage") {
-            panic!("Looking up total garbage gave output: {:?}", e);
-        }
-
-        if let Some(e) = field_lookup("TransitionInfo", "name garbage") {
-            panic!(
-                "Looking up valid block name but invalid field gave output: {:?}",
-                e
-            );
-        }
-
-        if let Some(e) = field_lookup("block garbage", "cost") {
-            panic!(
-                "Looking up valid field name but invalid block gave output: {:?}",
-                e
-            );
-        }
-
-        if let Some(e) = field_lookup("TransitionInfo", "realize_gate") {
-            panic!(
-                "Both block and field valid, but not together. Shouldn't have gotten: {:?}",
-                e
-            );
-        }
-
-        {
-            let lookup = field_lookup("TransitionInfo", "cost");
-            assert!(lookup.is_some());
-            let lookup = lookup.unwrap();
-            assert_eq!(
-                lookup.typ,
-                Type::Function {
-                    params: vec![Type::UserDef("Transition".to_string())],
-                    return_type: Box::new(Type::Float)
-                }
-            );
-        }
-
-        {
-            let lookup = field_lookup("RouteInfo", "realize_gate");
-            assert!(lookup.is_some());
-            let lookup = lookup.unwrap();
-            assert_eq!(
-                lookup.typ,
-                Type::Function {
-                    params: vec![Type::ArchT, Type::StateT, Type::Gate],
-                    return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
-                        "GateRealization".to_string(),
-                    )))),
-                }
-            );
-        }
-    }
 }

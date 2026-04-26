@@ -1,11 +1,20 @@
-use std::{collections::HashMap, fmt::Write};
+use std::{collections::{HashMap, HashSet}, fmt::Write};
 
-use crate::ast::TypeAnnotation;
+use crate::{ast::TypeAnnotation, parser::FetchAndAdd};
 
 /// The type system for Amaro expressions.
+/// 
+/// Each expression has a Type.
 ///
 /// Represents all possible types that can appear in the language, including
 /// primitives, quantum-specific types, compound types, and function signatures.
+/// 
+/// Some types are special and perhaps obtuse. They are:
+/// - UserDef
+/// - Generic
+/// - Unknown
+/// 
+/// See more about these below.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub enum Type {
@@ -38,15 +47,45 @@ pub enum Type {
     },
 
     // Struct types
+    /// Users can define structs, such as GateRealization and Transition.
+    /// These are called UserDef, where the String is the name of the struct.
+    /// Whenever a user defines a struct, information about its fields are
+    /// stored in a UserDefTable, which can be referenced to determine the
+    /// type of indexing off of a UserDef.
     UserDef(String),
 
     // Generic
+    /// Oftentimes a type must use generic types. Use this in place of things
+    /// like <T> or <H> or whatever. The passed u8 corresponds to the "name" of
+    /// the variable used. So, all types that should be type T need to have the
+    /// same u8 locally, and all the types that should be type H need to have
+    /// the same u8 locally, but distinct from T. Just like normal generics.
+    /// 
+    /// Throughout the semantic checking process, generics are resolved locally
+    /// and conflicts are taken care of. For instance, recognize that the Vec()
+    /// function has the type Vec(Generic(0)). So, if I do Vec().push(Vec()),
+    /// then in doing so, each Vec is assigned a different generic value by the
+    /// system, before the generics are resolved. This means conflicts won't
+    /// occur with generics of equal values, because generics are resolved
+    /// locally and not globally.
+    /// 
+    /// Warning that there will be issues if there are more than 256 different
+    /// generic types in a single expression. Can simply increase from u8 to u16
+    /// TODO increase from u8 to u16
     Generic(u8), // local id for generic is the u8
 
+    /// Unknown is used when there are details about the language we are
+    /// uncertain of, OR if a user provides some bad input and we don't wish to
+    /// propagate errors. By setting a type as Unknown, we ensure that the
+    /// program will be "kind" to the type going forward and not report errors
+    /// about it. 
     Unknown,
 }
 
+
 impl Type {
+    /// Turns a TypeAnnotation from the parser into a Type that's useable by
+    /// the semantic checker
     pub fn from_type_annotation(type_annotation: &TypeAnnotation) -> Self {
         match type_annotation {
             TypeAnnotation::Simple(name) => match name.as_str() {
@@ -68,14 +107,14 @@ impl Type {
             TypeAnnotation::Generic(name, type_annotations) => match name.as_str() {
                 "Vec" => {
                     if type_annotations.len() != 1 {
-                        Type::Unknown
+                        Type::Generic(0) // TODO should this be generic or unknown?
                     } else {
                         Type::Vec(Box::new(Self::from_type_annotation(&type_annotations[0])))
                     }
                 }
                 "Option" => {
                     if type_annotations.len() != 1 {
-                        Type::Unknown
+                        Type::Generic(0) // TODO should this be generic or unknown?
                     } else {
                         Type::Option(Box::new(Self::from_type_annotation(&type_annotations[0])))
                     }
@@ -98,13 +137,11 @@ impl Type {
         }
     }
 
-    /// Markdown doesn't render <> properly.
-    /// So, use this for rendering those.
-    /// Uses standard formatting usually.
+    /// Use this for rendering type to markdown display
     pub fn to_markdown_display(&self) -> String {
-        format!("```rust\n{}\n```", self._to_markdown_display_recursive())
+        format!("```rust\n{}\n```", self._to_markdown_display_visitor())
     }
-    fn _to_markdown_display_recursive(&self) -> String {
+    fn _to_markdown_display_visitor(&self) -> String {
         match self {
             Type::Int
             | Type::Float
@@ -127,36 +164,36 @@ impl Type {
                 let mut iter = params.iter();
                 let mut string = String::new();
                 if let Some(first) = iter.next() {
-                    string += first._to_markdown_display_recursive().as_str();
+                    string += first._to_markdown_display_visitor().as_str();
                     for item in iter {
                         string += ", ";
-                        string += item._to_markdown_display_recursive().as_str();
+                        string += item._to_markdown_display_visitor().as_str();
                     }
                 }
                 format!(
                     "|{}| -> {}",
                     string,
-                    return_type._to_markdown_display_recursive().as_str()
+                    return_type._to_markdown_display_visitor().as_str()
                 )
             }
             Type::Tuple(items) => {
                 let mut iter = items.iter();
                 let mut string = String::new();
                 if let Some(first) = iter.next() {
-                    string += first._to_markdown_display_recursive().as_str();
+                    string += first._to_markdown_display_visitor().as_str();
                     for item in iter {
                         string += ", ";
-                        string += item._to_markdown_display_recursive().as_str();
+                        string += item._to_markdown_display_visitor().as_str();
                     }
                 }
                 format!("({})", string)
             }
-            Type::Vec(inner) => format!("Vec<{}>", inner._to_markdown_display_recursive()),
-            Type::Option(inner) => format!("Option<{}>", inner._to_markdown_display_recursive()),
+            Type::Vec(inner) => format!("Vec<{}>", inner._to_markdown_display_visitor()),
+            Type::Option(inner) => format!("Option<{}>", inner._to_markdown_display_visitor()),
         }
     }
 
-    /// Determines whether the type has generics.
+    /// Determines whether the type has generics somewhere within it
     pub fn contains_generic(&self) -> bool {
         match self {
             Type::Generic(_) => true,
@@ -183,6 +220,7 @@ impl Type {
         }
     }
 
+    /// Determines whether the type has generics or unknowns somewhere within it
     pub fn contains_generic_or_unknown(&self) -> bool {
         match self {
             Type::Unknown => true,
@@ -208,6 +246,97 @@ impl Type {
             } => {
                 return_type.contains_generic_or_unknown()
                     || params.iter().any(|f| f.contains_generic_or_unknown())
+            }
+        }
+    }
+
+    /// Given a type that has generics (usually from built-ins), makes the
+    /// generics unique by shifting them forward accoridng to the
+    /// next_generic_num
+    pub fn make_generics_unique(&mut self, next_generic_num: &mut FetchAndAdd<u8>) {
+        let mut generic_set: HashSet<u8> = HashSet::new();
+        self.generic_visitor(&mut generic_set);
+
+        if generic_set.is_empty() {
+            return; // nothing else to do
+        }
+
+        // ok great. now, devise generic shifts.
+        // maps from previos value to new value
+        let generic_shifts: HashMap<u8, u8> = generic_set
+            .iter()
+            .map(|elt| (*elt, next_generic_num.fetch_and_add()))
+            .collect();
+
+        // now finally, apply these shifts.
+        self.generic_shift_applicator(&generic_shifts);
+    }
+
+    /// Visits a type, and identifies all the generic numbers inside.
+    fn generic_visitor(&self, set: &mut HashSet<u8>) {
+        match self {
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::UserDef(_)
+            | Type::Unknown => { /* do nothing */ }
+            Type::Vec(inner) => inner.generic_visitor(set),
+            Type::Tuple(items) => items.iter().for_each(|elt| elt.generic_visitor(set)),
+            Type::Option(inner) => inner.generic_visitor(set),
+            Type::Function {
+                params,
+                return_type,
+            } => {
+                params.iter().for_each(|elt| elt.generic_visitor(set));
+                return_type.generic_visitor(set);
+            }
+            Type::Generic(c) => {
+                set.insert(*c);
+            }
+        }
+    }
+
+    /// Visits a type, and maps all generics from one value to another using
+    /// the shifts HashMap.
+    fn generic_shift_applicator(&mut self, shifts: &HashMap<u8, u8>) {
+        match self {
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::UserDef(_)
+            | Type::Unknown => { /* do nothing */ }
+            Type::Vec(inner) => inner.generic_shift_applicator(shifts),
+            Type::Tuple(items) => items
+                .iter_mut()
+                .for_each(|elt| elt.generic_shift_applicator(shifts)),
+            Type::Option(inner) => inner.generic_shift_applicator(shifts),
+            Type::Function {
+                params,
+                return_type,
+            } => {
+                params
+                    .iter_mut()
+                    .for_each(|elt| elt.generic_shift_applicator(shifts));
+                return_type.generic_shift_applicator(shifts);
+            }
+            Type::Generic(c) => {
+                *self = Type::Generic(*shifts.get(c).unwrap());
             }
         }
     }
@@ -270,7 +399,6 @@ impl std::fmt::Display for Type {
 /// A scoped symbol table for tracking variable bindings and their types.
 ///
 /// Uses a stack of scopes to support nested let-bindings and lambda parameters.
-/// The global scope contains all built-in functions and type constructors.
 pub struct SymbolTable {
     // bindings: HashMap<String, Type>,
     scopes: Vec<HashMap<String, Type>>,
@@ -320,9 +448,10 @@ impl Default for SymbolTable {
     }
 }
 
-/// There are user-defined types, like Transition.
-/// We need to have ONE place where we store these types.
-/// Then, we can reference these types from here by name.
+/// There are user-defined structs, like Transition.
+/// This provides a single place to store information about these types.
+/// Then, the types of the fields of the user-defined types can be determined
+/// from here.
 #[derive(Debug)]
 pub struct UserDefTable {
     /// maps from type names (like Transition) to their fields
@@ -338,7 +467,6 @@ impl UserDefTable {
     /// Given an AmaroFile, creates a UserDefTable which determines the fields
     /// of user-defined types.
     pub fn new(file: &crate::ast::AmaroFile) -> Self {
-        // TODO work on adding diagnostics in the case of errors
         let mut map: HashMap<String, UserDefEntry> = HashMap::new();
 
         for block in &file.blocks {
@@ -369,7 +497,7 @@ impl UserDefTable {
     }
 
     /// Creates an empty UserDefTable. Useful if it is known that there are no
-    /// user-defined types.
+    /// user-defined types, which really only happens for testing.
     #[cfg(test)]
     pub fn empty() -> Self {
         Self {
@@ -378,6 +506,9 @@ impl UserDefTable {
     }
 
     /// Gets the fields of a user-defined type, if the type has a definition.
+    /// 
+    /// The returned value, if exists, is a map from field names (strings) to
+    /// their associated types.
     pub fn get_fields(&self, identifier: &str) -> Option<&HashMap<String, Type>> {
         self.map.get(identifier).map(|elt| &elt.fields)
     }

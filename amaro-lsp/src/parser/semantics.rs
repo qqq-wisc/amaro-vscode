@@ -1,5 +1,5 @@
 use super::symbols::*;
-use crate::{ast::*, info::builtins};
+use crate::{ast::*, info::{builtins, fields}};
 use std::{
     collections::{HashMap, HashSet},
     ops::Add,
@@ -11,9 +11,12 @@ use tower_lsp::lsp_types::{
 
 pub struct SemanticResult {
     /// Diagnostic information
+    /// 
+    /// Diagnostics contain errors, warnings, and info that is passed to the
+    /// editor to be reported to the user.
     pub diagnostics: Vec<Diagnostic>,
 
-    /// Mappings from node IDs to types.
+    /// Mappings from node IDs to their determined types.
     pub type_map: HashMap<NodeId, Type>,
 
     /// Table for information about user-defined structs like GateRealization
@@ -24,9 +27,161 @@ pub struct SemanticResult {
     /// inferences. Like when typing "let x = 5;", the Rust analyzer extension
     /// shows "let x : i32 = 5;" with the inferred type.
     /// 
-    /// This can be used to label any strings, but also field names. It can be
-    /// used to provide hover information if needed.
+    /// This can be used to label any strings, but also field names. It can also 
+    /// be used to provide hover information if needed.
     pub string_labels: StringLabels,
+}
+
+/// Maps from expressions to their types (using expression IDs).
+/// Also stores whether an expression is "resolved", which is most useful during
+/// intermediary semantic checking steps.
+#[derive(Default)]
+pub struct TypeMap {
+    map: HashMap<NodeId, Type>,
+    /// Stores whether or not the expression is resolved.
+    /// An expression is resolved iff its type and the types of all
+    /// subexpressions contain no generics nor unknowns.
+    /// If an expression is resolved, then we never need to infer its type ever
+    /// again, and can just retrieve the type from the above map.
+    resolved: HashSet<NodeId>,
+}
+
+impl TypeMap {
+    pub fn new() -> TypeMap {
+        Self::default()
+    }
+    /// Gets the type of the provided node id (expr.id), if exists.
+    pub fn get(&self, id: &NodeId) -> Option<&Type> {
+        self.map.get(id)
+    }
+
+    /// Sets the value in the map.
+    /// overlay is preferred, as this will set the value to the new type,
+    /// not overlay it.
+    /// Only use set in situations where we are confident that it will produce
+    /// the same result as overlay.
+    pub fn set(&mut self, id: NodeId, typ: Type) -> Option<Type> {
+        self.map.insert(id, typ)
+    }
+
+    /// Updates the type in the type map
+    /// If no type exists, then simply puts the type in there.
+    /// If a type does already exist, then attempts to just overlay atop the
+    /// generics and unknowns, leaving the remaining structure unchanged.
+    /// Essentially becomes "more specific" with the type, changing the type
+    /// into one that is strictly "finer" and less ambiguous.
+    ///
+    /// Note that this naively overlays generics. So, suppose the existing
+    /// type was Tuple<T1, T1> and it was overlayed with Tuple<Int, T1>. It will
+    /// not recognize that Int corresponds to T1.
+    ///
+    /// Returns true if anything was changed, false otherwise.
+    pub fn overlay(&mut self, id: NodeId, new_type: &Type) -> bool {
+        match self.map.get_mut(&id) {
+            Some(prev_type) => overlay_type(prev_type, new_type),
+            None => {
+                self.set(id, new_type.clone());
+                true
+            }
+        }
+    }
+
+    pub fn is_resolved(&self, id: &NodeId) -> bool {
+        self.resolved.contains(id)
+    }
+
+    /// Marks the expression as resolved.
+    /// Once an expression has been marked as resolved, it will continue to be
+    /// resolved.
+    pub fn set_resolved(&mut self, id: NodeId) {
+        self.resolved.insert(id);
+    }
+}
+
+/// Information for where to place the "Rust analyzer" style gray type
+/// inferences. Like when typing "let x = 5;", the Rust analyzer extension
+/// shows "let x : i32 = 5;" with the inferred type.
+/// 
+/// This can be used to label any strings, but also field names. It can also 
+/// be used to provide hover information if needed.
+#[derive(Debug, Default)]
+pub struct StringLabels {
+    /// Key:
+    /// Really just a range. In the format of (startLine, startChar, endLine, endChar).
+    /// But, Range doesn't implement Hash, so this is easier.
+    /// Value:
+    /// The string being labeled and its type.
+    map: HashMap<(u32, u32, u32, u32), (String, Type)>,
+}
+
+impl StringLabels {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Identifies a string in the file with a type. Can re-identify the same
+    /// string later with a different type, no problem.
+    pub fn identify_label(&mut self, range: &Range, string: String, typ: Type) {
+        self.map.insert(
+            (
+                range.start.line,
+                range.start.character,
+                range.end.line,
+                range.end.character,
+            ),
+            (string, typ),
+        );
+    }
+
+    /// Gets the information for the label at a certain position, if a label
+    /// exists there.
+    pub fn get_label_info(&self, position: &Position) -> Option<(Range, String, Type)> {
+        self.map.iter().find_map(|elt| {
+            let range = elt.0;
+            if range.0 <= position.line
+                && range.2 >= position.line
+                && range.1 <= position.character
+                && range.3 > position.character
+            {
+                Some((
+                    Range::new(
+                        Position::new(range.0, range.1),
+                        Position::new(range.2, range.3),
+                    ),
+                    elt.1.0.clone(),
+                    elt.1.1.clone(),
+                ))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Gets all label information available within the provided range.
+    /// 
+    /// Useful because the LSP wants this information in order to display it to
+    /// the user.
+    pub fn get_all_labels_in_range(&self, range: &Range) -> Vec<(Range, String, Type)> {
+        self.map
+            .iter()
+            .filter(|elt| {
+                (elt.0.0 > range.start.line
+                    || elt.0.0 == range.start.line && elt.0.1 >= range.start.character)
+                    && (elt.0.2 < range.end.line
+                        || elt.0.2 == range.end.line && elt.0.3 < range.end.character)
+            })
+            .map(|elt| {
+                (
+                    Range::new(
+                        Position::new(elt.0.0, elt.0.1),
+                        Position::new(elt.0.2, elt.0.3),
+                    ),
+                    elt.1.0.clone(),
+                    elt.1.1.clone(),
+                )
+            })
+            .collect()
+    }
 }
 
 /// Performs semantic analysis on an entire parsed Amaro file.
@@ -140,7 +295,7 @@ pub fn check_semantics(
 
                 let mut inf_data = InferenceData {
                     sym_table: &mut sym_table,
-                    diagnostics: &mut diagnostics,
+                    diagnostics: &mut Vec::new(), // do this bc it will be messy in register_field
                     type_map: &mut type_map,
                     user_def_table: &user_def_table,
                     generic_table: &mut generic_table,
@@ -149,11 +304,13 @@ pub fn check_semantics(
 
                 let mut field_type = register_field(&field.value, &mut inf_data);
 
+                diagnostics.append(inf_data.diagnostics); // append the vec here
+
                 // 3.2. Enforce types on all fields
                 // Additionally, use the field type to help inform the expression type.
                 
                 // get the expected type of the field based off the field name
-                if let Some(field_info) = builtins::field_lookup(block_name, &field.key) {
+                if let Some(field_info) = fields::field_lookup(block_name, &field.key) {
 
                     // so, we found the type for the field. destructure to
                     // function type since all fields should be this
@@ -281,135 +438,11 @@ fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct StringLabels {
-    map: HashMap<(u32, u32, u32, u32), (String, Type)>,
-}
-
-impl StringLabels {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn identify_label(&mut self, range: &Range, string: String, typ: Type) {
-        self.map.insert(
-            (
-                range.start.line,
-                range.start.character,
-                range.end.line,
-                range.end.character,
-            ),
-            (string, typ),
-        );
-    }
-
-    pub fn get_label_info(&self, position: &Position) -> Option<(Range, String, Type)> {
-        self.map.iter().find_map(|elt| {
-            let range = elt.0;
-            if range.0 <= position.line
-                && range.2 >= position.line
-                && range.1 <= position.character
-                && range.3 > position.character
-            {
-                Some((
-                    Range::new(
-                        Position::new(range.0, range.1),
-                        Position::new(range.2, range.3),
-                    ),
-                    elt.1.0.clone(),
-                    elt.1.1.clone(),
-                ))
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn get_all_labels_in_range(&self, range: &Range) -> Vec<(Range, String, Type)> {
-        self.map
-            .iter()
-            .filter(|elt| {
-                (elt.0.0 > range.start.line
-                    || elt.0.0 == range.start.line && elt.0.1 >= range.start.character)
-                    && (elt.0.2 < range.end.line
-                        || elt.0.2 == range.end.line && elt.0.3 < range.end.character)
-            })
-            .map(|elt| {
-                (
-                    Range::new(
-                        Position::new(elt.0.0, elt.0.1),
-                        Position::new(elt.0.2, elt.0.3),
-                    ),
-                    elt.1.0.clone(),
-                    elt.1.1.clone(),
-                )
-            })
-            .collect()
-    }
-}
-
-#[derive(Default)]
-pub struct TypeMap {
-    map: HashMap<NodeId, Type>,
-    /// Stores whether or not the expression is resolved.
-    /// An expression is resolved iff its type and the types of all
-    /// subexpressions contain no generics nor unknowns.
-    /// If an expression is resolved, then we never need to infer its type ever
-    /// again.
-    resolved: HashSet<NodeId>,
-}
-
-impl TypeMap {
-    pub fn new() -> TypeMap {
-        Self::default()
-    }
-    /// HashMap get for compatibility
-    pub fn get(&self, id: &NodeId) -> Option<&Type> {
-        self.map.get(id)
-    }
-
-    /// Sets the value in the map.
-    /// overlay is preferred, as this will set the value to the new type,
-    /// not overlay it.
-    pub fn set(&mut self, id: NodeId, typ: Type) -> Option<Type> {
-        self.map.insert(id, typ)
-    }
-
-    /// Updates the type in the type map
-    /// If no type exists, then simply puts the type in there.
-    /// If a type does already exist, then attempts to just overlay the generics
-    /// and unknowns, leaving the remaining structure unchanged, in an attempt
-    /// to make a more specific type.
-    ///
-    /// Note that this naively overlays generics. So, suppose the existing
-    /// type was Tuple<T1, T1> and it was overlayed with Tuple<Int, T1>. It will
-    /// not recognize that Int corresponds to T1.
-    ///
-    /// Returns true if anything was changed, false otherwise.
-    pub fn overlay(&mut self, id: NodeId, new_type: &Type) -> bool {
-        match self.map.get_mut(&id) {
-            Some(prev_type) => overlay_type(prev_type, new_type),
-            None => {
-                self.set(id, new_type.clone());
-                true
-            }
-        }
-    }
-
-    pub fn is_resolved(&self, id: &NodeId) -> bool {
-        self.resolved.contains(id)
-    }
-
-    pub fn set_resolved(&mut self, id: NodeId) {
-        self.resolved.insert(id);
-    }
-}
-
-// /// Precondition: Generics already found with find_generics_in_correspondent_types
-// /// Drops Unknowns in favor of knowns, and applies generics.
-// pub fn merge_correspondent_types(t1: &Type, t2: &Type, generic_table: &GenericTable) -> Result<(), Vec<String>>
 
 /// Given the background_type and foreground_type are correspondent,
 /// replaces unknowns in the background type with the values from the foreground type.
+/// 
+/// Returns true if anything was changed in the background type, false otherwise.
 pub fn overlay_unknowns(background_type: &mut Type, foreground_type: &Type) -> bool {
     match background_type {
         Type::Int
@@ -487,17 +520,9 @@ pub fn overlay_unknowns(background_type: &mut Type, foreground_type: &Type) -> b
 /// the background type. If the background type contains a generic or unknown
 /// in the same place that the foreground type contains something real, then
 /// the background type has its values replaced with those in the foreground
-/// type, so that we produce a strictly more-specific type.
-///
-/// Think of this like in image editing, where we overlay a foreground onto
-/// a background. Generics and unknowns are transparent pixels.
+/// type, so that we produce a strictly "finer" type.
 ///
 /// Returns true if any modification was made to the background type.
-///
-/// What overlay_generics does:
-/// If it is set, then if the types contain a scenario where the background type
-/// is Generic(a) and the foreground type is Generic(b), then Generic(b) will be
-/// overlayed onto Generic(a).
 pub fn overlay_type(background_type: &mut Type, foreground_type: &Type) -> bool {
     match background_type {
         Type::Int
@@ -601,10 +626,10 @@ where
 }
 
 /// A GenericTable tracks generic-relevant information for as long as it lives.
-/// It should NOT live for the duration of the file.
+/// It should NOT live for the duration of the file semantic checking.
 /// Rather, whenever we want to infer the type of a field's expression, we make
-/// ONE GenericTable for usage during the semantic analysis of that entire expression
-/// and all subexpressions.
+/// ONE GenericTable for usage during the semantic analysis of that single
+/// field's expression.
 pub struct GenericTable {
     /// The next generic number to assign to a newfound generic.
     pub next_generic_num: FetchAndAdd<u8>,
@@ -688,7 +713,7 @@ impl GenericTable {
         self.map.get(generic_num)
     }
 
-    /// Replaces generic types with their assigned values
+    /// Replaces generic types within the given type with their assigned values
     pub fn try_degenerisize(&self, t1: &Type) -> Type {
         match t1 {
             Type::Generic(a) => {
@@ -725,8 +750,9 @@ impl GenericTable {
         }
     }
 
-    /// Tightens up the table, meaning resolves generics that reference other
-    /// generics.
+    /// Resolves generics that reference other generics within the table.
+    /// Uses measures to avoid infinite loops, though it feels impossible
+    /// to encounter one in practice.
     pub fn tighten_up(&mut self) -> bool {
         self.viewing_set = HashSet::new();
         let assignments_vec: Vec<(u8, Type)> = self
@@ -917,6 +943,7 @@ pub struct InferenceData<'a> {
 /// the type map.
 /// Recursively descends into the expression, replacing generic types wherever
 /// found.
+/// Best to use this on the field's expression
 pub fn apply_generic_info(expr: &Expr, inference_data: &mut InferenceData) {
     let original_type = inference_data.type_map.get(&expr.id).unwrap();
     let new_type = inference_data.generic_table.try_degenerisize(original_type);
@@ -992,17 +1019,6 @@ pub fn apply_generic_info(expr: &Expr, inference_data: &mut InferenceData) {
     }
 }
 
-pub fn deduplicate(vec: &mut Vec<Diagnostic>) {
-    let mut seen = Vec::new();
-    vec.retain(|x| {
-        if seen.contains(x) {
-            false
-        } else {
-            seen.push(x.clone());
-            true
-        }
-    });
-}
 
 /// Given a field, registers all its info. Recursively and repeatedly does type
 /// inference until there is nothing else to gather.
@@ -1017,6 +1033,7 @@ pub fn register_field(field: &Expr, inference_data: &mut InferenceData) -> Type 
     let mut num_loops = 0;
 
     while inference_data.generic_table.is_dirty() {
+        inference_data.diagnostics.clear();
         if num_loops > 30 {
             // very likely something has gone horribly wrong.
             // this should never happen, but it's good to have this here anyway.
@@ -1024,7 +1041,7 @@ pub fn register_field(field: &Expr, inference_data: &mut InferenceData) -> Type 
                 range: field.range,
                 severity: Some(DiagnosticSeverity::ERROR),
                 message:
-                    "Parsing this field resulted in an infinite loop due to generics resolution."
+                    "Performing semantic checking on this field resulted in an infinite loop due to generics resolution."
                         .to_string(),
                 ..Default::default()
             });
@@ -1042,10 +1059,6 @@ pub fn register_field(field: &Expr, inference_data: &mut InferenceData) -> Type 
     // eventually, the generic table should stop being dirty. if not, then we
     // are always making progress to removing generics.
 
-    // diagnostics might get duplicated since we rerun infer_expr_type a lot
-    // a little inefficient, but functional without seamripping
-    deduplicate(inference_data.diagnostics);
-
     inference_data.type_map.get(&field.id).unwrap().clone() // always present
 }
 
@@ -1056,12 +1069,18 @@ pub fn register_field(field: &Expr, inference_data: &mut InferenceData) -> Type 
 pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type {
     // generics can only be introduced through built-ins.
     // first, check if already resolved.
+    // an expression is resolved if it contains no generics or unknowns in its
+    // type, or in the types of any subexpressions
+    // resolved expressions can just use the type map and don't need to redo
+    // inference.
     if inference_data.type_map.is_resolved(&expr.id) {
         return inference_data.type_map.get(&expr.id).unwrap().clone();
     }
 
     // otherwise, need to resolve it
 
+    // found_type -> type to assign to this expr
+    // resolved -> determiner for whether the expr will be marked as resolved
     let (found_type, resolved): (Type, bool) = match &expr.kind {
         ExprKind::IntLiteral(_) => (Type::Int, true),
         ExprKind::FloatLiteral(_) => (Type::Float, true),
@@ -1082,6 +1101,9 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 .unwrap_or_else(|| {
                     // if not in symbol table, check if we already have given this
                     // expression a type. if we have, then don't recalculate at all.
+                    // we need to do this because we don't want to re-pull from the
+                    // built-ins every time, since generic resolution takes multiple
+                    // passes.
                     inference_data
                         .type_map
                         .get(&expr.id)
@@ -1092,8 +1114,7 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                                 .map(|elt| {
                                     // shift the generics so they are unique
                                     let mut new_type = elt.typ.clone();
-                                    builtins::make_generics_unique(
-                                        &mut new_type,
+                                    new_type.make_generics_unique(
                                         &mut inference_data.generic_table.next_generic_num,
                                     );
                                     new_type
@@ -1293,8 +1314,9 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             // TODO uncomment out the line below, and test this, instead of doing any overlay stuff.
             // additionally, change overlay_type to overlay_unknowns, not generics. can overlay generics later.
             // inference_data.generic_table.find_generics_in_correspondent_types(&then_type, &else_type);
-            let overlayed_dir_1 = overlay_type(&mut then_type, &else_type);
-            let overlayed_dir_2 = overlay_type(&mut else_type, &then_type);
+            let overlayed_dir_1 = overlay_unknowns(&mut then_type, &else_type);
+            let overlayed_dir_2 = overlay_unknowns(&mut else_type, &then_type);
+            inference_data.generic_table.find_generics_in_correspondent_types(&then_type, &else_type);
 
             if overlayed_dir_1 {
                 retype(then_branch, then_type.clone(), inference_data);
@@ -1500,7 +1522,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
 
                 let outcome_type = match type_from_user_def {
                     Some(t) => t.clone(),
-                    // TODOGEN
                     None => match builtins::check_built_in_after_type(&obj_type, field) {
                         Some(builtins::Owner::Owned(built_in)) => built_in.typ.clone(),
                         Some(builtins::Owner::Borrowed(built_in)) => built_in.typ.clone(),
@@ -1527,7 +1548,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
         }
         ExprKind::StructLiteral { name, fields } => {
             // the only valid struct literals are those of UserDef, right?
-            // im going to go with that
             // LS: Determine if that is accurate
             for (_, value) in fields {
                 infer_expr_type(value, inference_data);
@@ -1801,9 +1821,10 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
         }
     };
 
-    // TODO: compare found type and original type to get generic types
-    // TODO: then, now that we have generic types, go through and
 
+    // at this point, we have the found_type and resolved values
+    // overlay the found_type in the type_map, meaning it will insert if nothing
+    // present or strictly add info if something present
     inference_data.type_map.overlay(expr.id, &found_type);
     if resolved {
         inference_data.type_map.set_resolved(expr.id);
@@ -2024,20 +2045,11 @@ pub fn suggest_next_from_type(
 /// Use this once we have identified the mappings of the generics first, otherwise
 /// we risk losing information by losing association between generics and their types.
 pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
-    // eprintln!("  Range: {:?}", expr.range);
-    // if let Some(old_type) = inference_data.type_map.get(&expr.id) {
-    //     // eprintln!("Retyping {} from {} to {}", expr.kind, old_type, new_type);
-    // } else {
-    //     eprintln!(
-    //         ":::HEY! Retyping {} to {}, but no old type existed!",
-    //         expr.kind, new_type
-    //     );
-    // }
-
+    // retyping starts with a simple overlay.
     inference_data.type_map.overlay(expr.id, &new_type);
 
-    // TODO: Can infer function return type this way, but don't have a good
-    // method for doing this right now.
+    // then, we see what type of expression we're dealing with, and see if
+    // consequently any subexpressions need to be retyped too
     match &expr.kind {
         ExprKind::Identifier(_) => {}
         ExprKind::IntLiteral(_) => {}
@@ -2067,12 +2079,7 @@ pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
         ExprKind::FunctionCall { .. } => {
             // consider retyping the function's return type to be whatever this type is
         }
-        ExprKind::FieldAccess { .. } => {
-            // Well.. we could retype the original if it is generic and our generic
-            // depends on it, which is very complex & only happens with built-ins
-            // like Vec and Option. Could be a stretch feature, because it's not
-            // a huge deal.
-        }
+        ExprKind::FieldAccess { .. } => {}
         ExprKind::IndexAccess { object, .. } => {
             // can retype the object as a vec of elements of this type
             retype(
@@ -2161,56 +2168,6 @@ pub fn retype(expr: &Expr, new_type: Type, inference_data: &mut InferenceData) {
             arms.iter()
                 .for_each(|elt| retype(&elt.body, new_type.clone(), inference_data));
         }
-    }
-}
-
-/// Given a type that we know has generics, and a generic map which maps from
-/// the generic IDs to their actual types, reconstructs the actual type by
-/// substituting in the generics with the types in the map.
-/// If the first entry in the tuple is false, then there are still unresolved
-/// generics. It likely means that there is a dependency of one generic on
-/// another, which can (hopefully) be resolved by making substitutions and then
-/// repeating the generic inference process.
-///
-/// TODO abolish this, repetitive with stuff in GenericTable
-pub fn degenerisize(type_with_generics: &Type, generic_table: &GenericTable) -> (bool, Type) {
-    match type_with_generics {
-        Type::Generic(c) => match generic_table.get(c) {
-            Some(t) => (true, t.clone()),
-            None => (false, Type::Generic(*c)),
-        },
-        Type::Vec(inner) => {
-            let contents = degenerisize(inner, generic_table);
-            (contents.0, Type::Vec(Box::new(contents.1)))
-        }
-        Type::Tuple(items) => {
-            let results = items.iter().map(|elt| degenerisize(elt, generic_table));
-            let done = results.clone().all(|b| b.0);
-
-            (done, Type::Tuple(results.map(|elt| elt.1).collect()))
-        }
-        Type::Option(inner) => {
-            let contents = degenerisize(inner, generic_table);
-            (contents.0, Type::Option(Box::new(contents.1)))
-        }
-        Type::Function {
-            params,
-            return_type,
-        } => {
-            let params_results = params.iter().map(|elt| degenerisize(elt, generic_table));
-            let return_type_results = degenerisize(return_type, generic_table);
-            let done = params_results.clone().all(|b| b.0) && return_type_results.0;
-
-            (
-                done,
-                Type::Function {
-                    params: params_results.map(|elt| elt.1).collect(),
-                    return_type: Box::new(return_type_results.1),
-                },
-            )
-        }
-        Type::Unknown => (true, Type::Unknown),
-        _ => (true, type_with_generics.clone()),
     }
 }
 

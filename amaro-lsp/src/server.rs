@@ -6,9 +6,9 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
-use crate::info::builtins;
+use crate::info::{builtins, fields};
 use crate::parser::symbols::{Type, UserDefTable};
-use crate::parser::{SemanticResult, StringLabels, check_semantics, parse_file, semantics, utils};
+use crate::parser::{ParseOutput, SemanticResult, StringLabels, check_semantics, parse_file, semantics, utils};
 
 #[derive(Debug)]
 pub struct CachedParse {
@@ -412,7 +412,8 @@ impl Backend {
 
         // Syntactic Analysis
         match parse_file(&text) {
-            Ok(file) => {
+            Ok(ParseOutput{ file, diagnostics: parse_diags }) => {
+                diagnostics.extend(parse_diags);
                 // Semantic Checks
                 // #[cfg(debug_assertions)]
                 // {
@@ -538,7 +539,7 @@ impl LanguageServer for Backend {
             None => return Ok(None),
         };
 
-        if let Ok(file) = parse_file(text) {
+        if let Ok(ParseOutput{file, diagnostics: _parse_diagnostics}) = parse_file(text) {
             let symbols = build_document_symbols(&file);
             return Ok(Some(DocumentSymbolResponse::Nested(symbols)));
         }
@@ -600,7 +601,7 @@ impl LanguageServer for Backend {
         if let Some((block_name, field_name, field_range)) = hovered_field {
             // need to lookup the name
             if let Some(field_info) =
-                builtins::field_lookup(block_name.as_str(), field_name.as_str())
+                fields::field_lookup(block_name.as_str(), field_name.as_str())
             {
                 return Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
@@ -667,14 +668,10 @@ impl LanguageServer for Backend {
 
         let guard = self.parse_cache.read().await;
 
-        eprintln!("Checking guard for string labels");
-
         let string_labels = match guard.get(&uri) {
             None => return Ok(None),
             Some(t) => &t.string_labels,
         };
-
-        eprintln!("Got string labels.");
 
         let res: Vec<InlayHint> = string_labels
             .get_all_labels_in_range(&params.range)

@@ -38,8 +38,8 @@ fn test_advanced_features_and_vectors() {
         cost = 1.0
     "#;
 
-    let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file).diagnostics;
+    let parse_output = parse_file(&input).unwrap();
+    let diags = check_semantics(&parse_output.file).diagnostics;
 
     // 3. Assert NO Errors
     for diag in &diags {

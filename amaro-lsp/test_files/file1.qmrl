@@ -1,7 +1,7 @@
 GateRealization[
     routed_gates = CX
     name = 'SimpleGate'
-    data = (u : Location, v : Location)
+    data = let x = 5 in if x > 2 then 1 else 2
 ]
 
 Transition[
@@ -11,5 +11,5 @@ Transition[
 
 Architecture[
     name = 'SimpleArch'
-    data = (width : Int, height : Int)
+    data = Arch ++ Gate
 ]
