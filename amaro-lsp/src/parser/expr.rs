@@ -76,7 +76,11 @@ fn parse_keyword<'a>(kw: &'static str) -> impl FnMut(&'a str) -> IResult<&'a str
     move |input: &'a str| verify(parse_identifier, move |s: &str| s == kw)(input)
 }
 
-pub fn parse_expr<'a>(original_input: &'a str, input: &'a str, diags: &mut Vec<Diagnostic>) -> IResult<&'a str, Expr> {
+pub fn parse_expr<'a>(
+    original_input: &'a str,
+    input: &'a str,
+    diags: &mut Vec<Diagnostic>,
+) -> IResult<&'a str, Expr> {
     let (input, _) = whitespace_handler(input)?;
 
     let mut ctx = ParseContext::new();
@@ -87,7 +91,7 @@ fn parse_expr_with_context<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     ctx.enter()
         .map_err(|_| nom::Err::Error(Error::new(input, nom::error::ErrorKind::TooLarge)))?;
@@ -100,7 +104,7 @@ fn parse_let_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
@@ -116,18 +120,18 @@ fn parse_let_expr<'a>(
             Err(e) => match e {
                 nom::Err::Error(new_input) => {
                     // just assume it's missing, nothing there
-                    let new_input_loc = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
+                    let new_input_loc =
+                        new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
                     let range = calc_range(original_input, new_input_loc, 1);
-                    diags.push(Diagnostic { 
-                        range, 
+                    diags.push(Diagnostic {
+                        range,
                         severity: Some(DiagnosticSeverity::ERROR),
-                        
                         source: Some("Parser".to_string()), 
                         message: "Missing an identifier in the let expression. Format: let [identifier] = [value] in [expression]".to_string(), ..Default::default()});
 
                     (new_input.input, (new_input.input, range))
-                },
-                _ => return Err(e) // gen unrecoverable
+                }
+                _ => return Err(e), // gen unrecoverable
             },
         };
 
@@ -139,13 +143,21 @@ fn parse_let_expr<'a>(
                 nom::Err::Error(new_input) => {
                     // add diagnostic that the = was missing
                     // but, just move on anyway, as if we had the =
-                    diags.push(Diagnostic { 
-                        range: calc_range(original_input, new_input.input.as_ptr() as usize - original_input.as_ptr() as usize - 1, 1), 
-                        severity: Some(DiagnosticSeverity::ERROR), 
-                        source: Some("Parser".to_string()), 
-                        message: "Need an = sign in let expr".to_string(), ..Default::default() });
+                    diags.push(Diagnostic {
+                        range: calc_range(
+                            original_input,
+                            new_input.input.as_ptr() as usize
+                                - original_input.as_ptr() as usize
+                                - 1,
+                            1,
+                        ),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "Need an = sign in let expr".to_string(),
+                        ..Default::default()
+                    });
                     new_input.input
-                },
+                }
                 _ => return Err(e),
             },
         };
@@ -161,15 +173,22 @@ fn parse_let_expr<'a>(
                 nom::Err::Error(new_input) => {
                     // add diagnostic that the 'in' was missing
                     // but, just move on anyway, as if we had the 'in'
-                    diags.push(Diagnostic { 
-                        range: calc_range(original_input, new_input.input.as_ptr() as usize - original_input.as_ptr() as usize - 1, 1), 
-                        severity: Some(DiagnosticSeverity::ERROR), 
-                        source: Some("Parser".to_string()), 
-                        message: "Need an \"in\" after the value for a let expr".to_string(), ..Default::default() });
+                    diags.push(Diagnostic {
+                        range: calc_range(
+                            original_input,
+                            new_input.input.as_ptr() as usize
+                                - original_input.as_ptr() as usize
+                                - 1,
+                            1,
+                        ),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "Need an \"in\" after the value for a let expr".to_string(),
+                        ..Default::default()
+                    });
                     new_input.input
-                },
+                }
                 _ => return Err(e),
-                
             },
         };
         let (input, _) = whitespace_handler(input)?;
@@ -207,7 +226,7 @@ fn parse_if_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
@@ -228,15 +247,21 @@ fn parse_if_expr<'a>(
             Ok(r) => r.0,
             Err(e) => match e {
                 nom::Err::Error(new_input) => {
-                    diags.push(Diagnostic { 
-                        range: calc_range(original_input, before_usize - original_input.as_ptr() as usize, new_input.input.as_ptr() as usize - before_usize), 
-                        severity: Some(DiagnosticSeverity::ERROR), 
-                        source: Some("Parser".to_string()), 
-                        message: "Need a \"then\" after the condition for an if expr".to_string(), ..Default::default() });
+                    diags.push(Diagnostic {
+                        range: calc_range(
+                            original_input,
+                            before_usize - original_input.as_ptr() as usize,
+                            new_input.input.as_ptr() as usize - before_usize,
+                        ),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "Need a \"then\" after the condition for an if expr".to_string(),
+                        ..Default::default()
+                    });
                     new_input.input
-                },
+                }
                 _ => return Err(e),
-            }
+            },
         };
         let (input, _) = whitespace_handler(input)?;
 
@@ -249,15 +274,21 @@ fn parse_if_expr<'a>(
             Ok(r) => r.0,
             Err(e) => match e {
                 nom::Err::Error(new_input) => {
-                    diags.push(Diagnostic { 
-                        range: calc_range(original_input, before_usize - original_input.as_ptr() as usize, new_input.input.as_ptr() as usize - before_usize), 
-                        severity: Some(DiagnosticSeverity::ERROR), 
-                        source: Some("Parser".to_string()), 
-                        message: "Need a \"else\" after the condition for an if expr".to_string(), ..Default::default() });
+                    diags.push(Diagnostic {
+                        range: calc_range(
+                            original_input,
+                            before_usize - original_input.as_ptr() as usize,
+                            new_input.input.as_ptr() as usize - before_usize,
+                        ),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "Need a \"else\" after the condition for an if expr".to_string(),
+                        ..Default::default()
+                    });
                     new_input.input
-                },
+                }
                 _ => return Err(e),
-            }
+            },
         };
         let (input, _) = whitespace_handler(input)?;
 
@@ -285,7 +316,7 @@ fn parse_lambda_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
@@ -304,21 +335,28 @@ fn parse_lambda_expr<'a>(
                 let (i, _) = whitespace_handler(i)?;
                 with_range(original_input, parse_non_keyword_identifier)(i)
             },
-        )(input) {
+        )(input)
+        {
             Ok(r) => r,
-            Err(e) => match e{
+            Err(e) => match e {
                 nom::Err::Error(new_input) => {
                     // recovery on no separated list? or separated list had issue
                     // TODO fill this in
-                    diags.push(Diagnostic { 
-                        range: calc_range(original_input, before_usize - original_input.as_ptr() as usize, new_input.input.as_ptr() as usize - before_usize), 
-                        severity: Some(DiagnosticSeverity::ERROR), 
-                        source: Some("Parser".to_string()), 
-                        message: "Could not evaluate parameters of lambda expression".to_string(), ..Default::default() });
+                    diags.push(Diagnostic {
+                        range: calc_range(
+                            original_input,
+                            before_usize - original_input.as_ptr() as usize,
+                            new_input.input.as_ptr() as usize - before_usize,
+                        ),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "Could not evaluate parameters of lambda expression".to_string(),
+                        ..Default::default()
+                    });
                     (new_input.input, Vec::new())
-                },
-                _ => return Err(e)
-            }
+                }
+                _ => return Err(e),
+            },
         };
 
         // 2. Handle closing pipe '|'
@@ -326,17 +364,23 @@ fn parse_lambda_expr<'a>(
         let before_usize = input.as_ptr() as usize;
         let input = match char::<&str, Error<&str>>('|')(input) {
             Ok(r) => r.0,
-            Err(e) => match e{
+            Err(e) => match e {
                 nom::Err::Error(new_input) => {
-                    diags.push(Diagnostic { 
-                        range: calc_range(original_input, before_usize - original_input.as_ptr() as usize, new_input.input.as_ptr() as usize - before_usize), 
-                        severity: Some(DiagnosticSeverity::ERROR), 
-                        source: Some("Parser".to_string()), 
-                        message: "Lambda needs a closing | after the parameters".to_string(), ..Default::default() });
+                    diags.push(Diagnostic {
+                        range: calc_range(
+                            original_input,
+                            before_usize - original_input.as_ptr() as usize,
+                            new_input.input.as_ptr() as usize - before_usize,
+                        ),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "Lambda needs a closing | after the parameters".to_string(),
+                        ..Default::default()
+                    });
                     new_input.input
-                },
-                _ => return Err(e)
-            }
+                }
+                _ => return Err(e),
+            },
         };
 
         // 3. Handle arrow '->' with whitespace around it
@@ -344,17 +388,24 @@ fn parse_lambda_expr<'a>(
         let before_usize = input.as_ptr() as usize;
         let input = match tag::<&str, &str, Error<&str>>("->")(input) {
             Ok(r) => r.0,
-            Err(e) => match e{
+            Err(e) => match e {
                 nom::Err::Error(new_input) => {
-                    diags.push(Diagnostic { 
-                        range: calc_range(original_input, before_usize - original_input.as_ptr() as usize, new_input.input.as_ptr() as usize - before_usize), 
-                        severity: Some(DiagnosticSeverity::ERROR), 
-                        source: Some("Parser".to_string()), 
-                        message: "Lambda needs -> after closing | following parameters list".to_string(), ..Default::default() });
+                    diags.push(Diagnostic {
+                        range: calc_range(
+                            original_input,
+                            before_usize - original_input.as_ptr() as usize,
+                            new_input.input.as_ptr() as usize - before_usize,
+                        ),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "Lambda needs -> after closing | following parameters list"
+                            .to_string(),
+                        ..Default::default()
+                    });
                     new_input.input
-                },
+                }
                 _ => return Err(e),
-            }
+            },
         };
         let (input, _) = whitespace_handler(input)?;
 
@@ -387,7 +438,7 @@ fn parse_logical_or_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     parse_binary_op(
         original_input,
@@ -402,7 +453,7 @@ fn parse_logical_and_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     parse_binary_op(
         original_input,
@@ -417,7 +468,7 @@ fn parse_comparison_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     parse_binary_op(
         original_input,
@@ -439,7 +490,7 @@ fn parse_tensor_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     parse_binary_op(
         original_input,
@@ -457,7 +508,7 @@ fn parse_range_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     parse_binary_op(
         original_input,
@@ -472,7 +523,7 @@ fn parse_additive_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     parse_binary_op(
         original_input,
@@ -490,7 +541,7 @@ fn parse_multiplicative_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     parse_binary_op(
         original_input,
@@ -548,7 +599,7 @@ fn parse_unary_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
@@ -580,7 +631,7 @@ fn parse_postfix_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     let (mut current_input, mut base) = parse_primary_expr(original_input, input, ctx, diags)?;
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
@@ -609,7 +660,8 @@ fn parse_postfix_expr<'a>(
                 if let Ok((rest_final, index_expr)) = terminated(
                     |i| parse_expr_with_context(original_input, i, ctx, diags),
                     ws(char(')')),
-                )(rest_inner) {
+                )(rest_inner)
+                {
                     let end = rest_final.as_ptr() as usize - original_input.as_ptr() as usize;
 
                     base = Expr::new(
@@ -622,19 +674,17 @@ fn parse_postfix_expr<'a>(
                     current_input = rest_final;
                     continue;
                 }
-                
+
                 // none of these, do something else
-                // TODO fill this in
                 let end = rest_inner.as_ptr() as usize - original_input.as_ptr() as usize;
-                diags.push(Diagnostic { 
-                    range: calc_range(original_input, start, end-start), 
+                diags.push(Diagnostic {
+                    range: calc_range(original_input, start, end - start),
                     severity: Some(DiagnosticSeverity::ERROR),
-                    source: Some("Parser".to_string()), 
-                    message: "Indexing with projection or dynamic failed.".to_string(), 
+                    source: Some("Parser".to_string()),
+                    message: "Indexing with projection or dynamic failed.".to_string(),
                     ..Default::default()
                 });
-                continue; // TODO what should we do here?
-
+                break; // TODO what should we do here?
             }
 
             // Field access or Tuple Indexing
@@ -650,6 +700,12 @@ fn parse_postfix_expr<'a>(
                 current_input = rest_inner;
                 continue;
             }
+            // shouldn't fall through.
+            // consume the '.', pretend there was something even tho there wasnt
+            current_input = rest;
+            let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
+            diags.push(Diagnostic { range: calc_range(original_input, start, end - start), severity: Some(DiagnosticSeverity::ERROR), source: Some("Parser".to_string()), message: "Trying to do either tuple projection or field indexing, but format not right after this.".to_string(), ..Default::default() });
+            break; // be done because what will even come after...?
         }
 
         // Indexing
@@ -659,18 +715,19 @@ fn parse_postfix_expr<'a>(
                 Ok(r) => r.0,
                 Err(e) => match e {
                     nom::Err::Error(new_input) => {
-                        let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
-                        diags.push(Diagnostic { 
-                            range: calc_range(original_input, start, end-start), 
+                        let end =
+                            new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
+                        diags.push(Diagnostic {
+                            range: calc_range(original_input, start, end - start),
                             severity: Some(DiagnosticSeverity::ERROR),
-                            source: Some("Parser".to_string()), 
-                            message: "Indexing with [] needs a closing ]".to_string(), 
+                            source: Some("Parser".to_string()),
+                            message: "Indexing with [] needs a closing ]".to_string(),
                             ..Default::default()
                         });
                         new_input.input
-                    },
-                    _ => return Err(e)
-                }
+                    }
+                    _ => return Err(e),
+                },
             };
 
             let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
@@ -687,7 +744,6 @@ fn parse_postfix_expr<'a>(
 
         // Function call
         if let Ok((rest, _)) = ws(char('('))(current_input) {
-
             let res = separated_list0(ws(char(',')), |i| {
                 //parse_expr_with_context(original_input, i, ctx)
                 let (i, _) = whitespace_handler(i)?;
@@ -701,36 +757,37 @@ fn parse_postfix_expr<'a>(
                 Ok(r) => r,
                 Err(e) => match e {
                     nom::Err::Error(new_input) => {
-                        let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
-                        diags.push(Diagnostic { 
-                            range: calc_range(original_input, start, end-start), 
+                        let end =
+                            new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
+                        diags.push(Diagnostic {
+                            range: calc_range(original_input, start, end - start),
                             severity: Some(DiagnosticSeverity::ERROR),
-                            source: Some("Parser".to_string()), 
-                            message: "Function call arguments could not be parsed".to_string(), 
+                            source: Some("Parser".to_string()),
+                            message: "Function call arguments could not be parsed".to_string(),
                             ..Default::default()
                         });
                         (new_input.input, Vec::new())
-
-                    },
+                    }
                     _ => return Err(e),
-                }
+                },
             };
             let rest = match ws(char(')'))(rest) {
                 Ok(r) => r.0,
                 Err(e) => match e {
                     nom::Err::Error(new_input) => {
-                        let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
-                        diags.push(Diagnostic { 
-                            range: calc_range(original_input, start, end-start), 
+                        let end =
+                            new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
+                        diags.push(Diagnostic {
+                            range: calc_range(original_input, start, end - start),
                             severity: Some(DiagnosticSeverity::ERROR),
-                            source: Some("Parser".to_string()), 
-                            message: "Function call needs closing ) after arguments".to_string(), 
+                            source: Some("Parser".to_string()),
+                            message: "Function call needs closing ) after arguments".to_string(),
                             ..Default::default()
                         });
                         new_input.input
-                    },
+                    }
                     _ => return Err(e),
-                }
+                },
             };
 
             let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
@@ -755,7 +812,7 @@ fn parse_primary_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     let start: usize = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
@@ -807,34 +864,34 @@ fn parse_primary_expr<'a>(
             Err(e) => match e {
                 nom::Err::Error(new_input) => {
                     let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
-                        diags.push(Diagnostic { 
-                            range: calc_range(original_input, start, end-start), 
-                            severity: Some(DiagnosticSeverity::ERROR),
-                            source: Some("Parser".to_string()), 
-                            message: "List literal arguments could not be parsed".to_string(), 
-                            ..Default::default()
-                        });
+                    diags.push(Diagnostic {
+                        range: calc_range(original_input, start, end - start),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "List literal arguments could not be parsed".to_string(),
+                        ..Default::default()
+                    });
                     (new_input.input, Vec::new())
-                },
+                }
                 _ => return Err(e),
-            }
+            },
         };
         let rest = match ws(char(']'))(rest) {
             Ok(r) => r.0,
             Err(e) => match e {
                 nom::Err::Error(new_input) => {
                     let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
-                        diags.push(Diagnostic { 
-                            range: calc_range(original_input, start, end-start), 
-                            severity: Some(DiagnosticSeverity::ERROR),
-                            source: Some("Parser".to_string()), 
-                            message: "List literal needs an ending ]".to_string(), 
-                            ..Default::default()
-                        });
+                    diags.push(Diagnostic {
+                        range: calc_range(original_input, start, end - start),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: "List literal needs an ending ]".to_string(),
+                        ..Default::default()
+                    });
                     new_input.input
-                },
+                }
                 _ => return Err(e),
-            }
+            },
         };
 
         let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
@@ -882,54 +939,54 @@ fn parse_primary_expr<'a>(
     match parse_identifier(input) {
         Ok((rest_after_id, id_str)) => {
             if let Ok((_, _)) = peek(ws(char('{')))(rest_after_id)
-            && !is_keyword(id_str)
-        {
-            let (rest, _) = ws(char('{'))(rest_after_id)?;
-            let (rest, fields) = separated_list0(
-                ws(char(',')),
-                map(
-                    tuple((parse_identifier, ws(char('=')), |i| {
-                        parse_expr_with_context(original_input, i, ctx, diags)
-                    })),
-                    |(name, _, expr)| (name.to_string(), expr),
-                ),
-            )(rest)?;
-            let (rest, _) = ws(char('}'))(rest)?;
+                && !is_keyword(id_str)
+            {
+                let (rest, _) = ws(char('{'))(rest_after_id)?;
+                let (rest, fields) = separated_list0(
+                    ws(char(',')),
+                    map(
+                        tuple((parse_identifier, ws(char('=')), |i| {
+                            parse_expr_with_context(original_input, i, ctx, diags)
+                        })),
+                        |(name, _, expr)| (name.to_string(), expr),
+                    ),
+                )(rest)?;
+                let (rest, _) = ws(char('}'))(rest)?;
 
-            let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
-            return Ok((
-                rest,
-                Expr::new(
-                    ExprKind::StructLiteral {
-                        name: id_str.to_string(),
-                        fields,
-                    },
-                    calc_range(original_input, start, end - start),
-                ),
-            ));
+                let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
+                return Ok((
+                    rest,
+                    Expr::new(
+                        ExprKind::StructLiteral {
+                            name: id_str.to_string(),
+                            fields,
+                        },
+                        calc_range(original_input, start, end - start),
+                    ),
+                ));
+            }
+
+            let len = id_str.len();
+            Ok((
+                rest_after_id,
+                Expr::identifier(id_str.to_string(), calc_range(original_input, start, len)),
+            ))
         }
-
-        let len = id_str.len();
-        Ok((
-            rest_after_id,
-            Expr::identifier(id_str.to_string(), calc_range(original_input, start, len)),
-        ))
-        },
         Err(e) => match e {
             nom::Err::Error(new_input) => {
-                let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
-                let range = calc_range(original_input, start, end-start);
-                diags.push(Diagnostic { 
-                    range,
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    source: Some("Parser".to_string()), 
-                    message: "Could not parse this expression.".to_string(), 
-                    ..Default::default()
-                });
+                // let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
+                // let range = calc_range(original_input, start, end-start);
+                // diags.push(Diagnostic {
+                //     range,
+                //     severity: Some(DiagnosticSeverity::ERROR),
+                //     source: Some("Parser".to_string()),
+                //     message: "Could not parse this expression.".to_string(),
+                //     ..Default::default()
+                // });
                 Err(nom::Err::Error(new_input))
-            },
-            _ => Err(e)
-        }
+            }
+            _ => Err(e),
+        },
     }
 }
 
@@ -937,7 +994,7 @@ fn parse_match_expr<'a>(
     original_input: &'a str,
     input: &'a str,
     ctx: &mut ParseContext,
-    diags: &mut Vec<Diagnostic>
+    diags: &mut Vec<Diagnostic>,
 ) -> IResult<&'a str, Expr> {
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
@@ -953,18 +1010,18 @@ fn parse_match_expr<'a>(
         Err(e) => match e {
             nom::Err::Error(new_input) => {
                 let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
-                let range = calc_range(original_input, start, end-start);
-                diags.push(Diagnostic { 
+                let range = calc_range(original_input, start, end - start);
+                diags.push(Diagnostic {
                     range,
                     severity: Some(DiagnosticSeverity::ERROR),
-                    source: Some("Parser".to_string()), 
-                    message: "Expected to find \"with\" in match".to_string(), 
+                    source: Some("Parser".to_string()),
+                    message: "Expected to find \"with\" in match".to_string(),
                     ..Default::default()
                 });
                 new_input.input
-            },
-            _ => return Err(e)
-        }
+            }
+            _ => return Err(e),
+        },
     };
 
     // Parse arms: `| pattern -> body`
@@ -977,18 +1034,18 @@ fn parse_match_expr<'a>(
             Err(e) => match e {
                 nom::Err::Error(new_input) => {
                     let end = new_input.input.as_ptr() as usize - original_input.as_ptr() as usize;
-                    let range = calc_range(original_input, start, end-start);
-                    diags.push(Diagnostic { 
+                    let range = calc_range(original_input, start, end - start);
+                    diags.push(Diagnostic {
                         range,
                         severity: Some(DiagnosticSeverity::ERROR),
-                        source: Some("Parser".to_string()), 
-                        message: "Expected to find \"->\" in match arm".to_string(), 
+                        source: Some("Parser".to_string()),
+                        message: "Expected to find \"->\" in match arm".to_string(),
                         ..Default::default()
                     });
                     new_input.input
-                },
-                _ => return Err(e)
-            }
+                }
+                _ => return Err(e),
+            },
         };
         let (rest, body) = parse_expr_with_context(original_input, rest, ctx, diags)?;
         arms.push(MatchArm { pattern, body });
@@ -1097,7 +1154,7 @@ fn parse_string_literal<'a>(
 
 #[test]
 fn test_temp() {
-    let my_str = "(jacob.jacobman.value)()*()*))".to_string();
+    let my_str = "map(|x| -> x.implementation.(path(), jacob)".to_string();
     match parse_expr(&my_str, &my_str, &mut Vec::new()) {
         Ok(r) => {
             println!("We parsed it as:");

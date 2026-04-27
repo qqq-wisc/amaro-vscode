@@ -1,6 +1,10 @@
+
+use std::collections::HashMap;
+
 use amaro_lsp::ast::*;
-use amaro_lsp::parser::symbols::Type;
-use amaro_lsp::parser::{check_semantics, overlay_type, parse_file};
+use amaro_lsp::parser::expr::parse_expr;
+use amaro_lsp::parser::symbols::{SymbolTable, Type, UserDefTable};
+use amaro_lsp::parser::{GenericTable, InferenceData, StringLabels, TypeMap, check_semantics, overlay_type, parse_file, register_field};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 const MOCK_MANDATORY_BLOCKS: &str = r#"
@@ -35,17 +39,19 @@ fn capitalization_warning() {
     let parse_output = parse_file(&input).unwrap();
     let diags = check_semantics(&parse_output.file).diagnostics;
 
+    assert!(diags.len() > 0, "Expect at least 1 diagnostic");
+
     let cap_errors: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.to_lowercase().contains("capitalized"))
+        .filter(|d| d.message.to_lowercase().contains("invalid"))
         .collect();
 
     assert_eq!(
         cap_errors.len(),
         1,
-        "Should have exactly 1 capitalization warning"
+        "Should have a warning about invalid block"
     );
-    assert_eq!(cap_errors[0].severity, Some(DiagnosticSeverity::WARNING));
+    assert_eq!(cap_errors[0].severity, Some(DiagnosticSeverity::ERROR));
 }
 
 #[test]
@@ -276,13 +282,11 @@ TransitionInfo:
     let warnings: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.severity == Some(DiagnosticSeverity::WARNING)
-                && d.message.contains("not a recognized standard gate")
+            d.severity == Some(DiagnosticSeverity::ERROR) && d.message.contains("InvalidGate")
         })
         .collect();
 
     assert_eq!(warnings.len(), 1, "Should warn about InvalidGate");
-    assert!(warnings[0].message.contains("InvalidGate"));
 
     let errors: Vec<_> = diags
         .iter()
@@ -338,11 +342,10 @@ TransitionInfo:
 
     let warnings: Vec<_> = diags
         .iter()
-        .filter(|d| d.severity == Some(DiagnosticSeverity::WARNING))
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR) && d.message.contains("BadGate"))
         .collect();
 
     assert_eq!(warnings.len(), 1, "Should warn only about BadGate");
-    assert!(warnings[0].message.contains("BadGate"));
 
     let errors: Vec<_> = diags
         .iter()
@@ -759,32 +762,37 @@ TransitionInfo:
     );
 }
 
-#[test]
-fn test_unknown_index_access_is_lenient() {
-    // x.implementation is Unknown (not a known Gate field).
-    // Projection/index into Unknown should be lenient — no error.
-    let input = r#"
-RouteInfo:
-    routed_gates = CX
-    GateRealization{path : Vec()}
-    realize_gate = map(|x| -> x.implementation.(0), State.implemented_gates())
-TransitionInfo:
-    get_transitions = []
-    apply = identity_application(step)
-    cost = 0.0
-"#;
-    let parse_output = parse_file(input).unwrap();
-    let diags = check_semantics(&parse_output.file).diagnostics;
-    let errors: Vec<_> = diags
-        .iter()
-        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "Unknown.index should be lenient. Got: {:?}",
-        errors
-    );
-}
+// LS: I very much disagree with this test.
+// If there is an unknown field, it should be added to this program.
+// Otherwise, we should indicate to the user that they are doing something
+// unexpected.
+
+// #[test]
+// fn test_unknown_index_access_is_lenient() {
+//     // x.nothing is Unknown (not a known Gate field).
+//     // Projection/index into Unknown should be lenient — no error.
+//     let input = r#"
+// RouteInfo:
+//     routed_gates = CX
+//     GateRealization{path : Vec()}
+//     realize_gate = map(|x| -> x.nothing.(0), State.implemented_gates())
+// TransitionInfo:
+//     get_transitions = []
+//     apply = identity_application(step)
+//     cost = 0.0
+// "#;
+//     let parse_output = parse_file(input).unwrap();
+//     let diags = check_semantics(&parse_output.file).diagnostics;
+//     let errors: Vec<_> = diags
+//         .iter()
+//         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+//         .collect();
+//     assert!(
+//         errors.is_empty(),
+//         "Unknown.index should be lenient. Got: {:?}",
+//         errors
+//     );
+// }
 
 #[test]
 fn test_nisq_realize_gate() {
@@ -1448,7 +1456,6 @@ TransitionInfo:
     );
 }
 
-
 // TODO I am uncertain whether this test should be included.
 // I can only find references to consistent and to_2d in old files with now
 // invalid syntax.
@@ -1732,4 +1739,166 @@ fn test_overlay_complex() {
 
     assert!(overlay_type(&mut t1, &half_match_foreground));
     assert_eq!(t1, half_match_expected_out);
+}
+
+
+#[test]
+fn test_if_then_else_information_sharing() {
+    let expr = "if x > 5 then Vec().push(5) else Vec()";
+    let mut diags = Vec::new();
+    let res_expr = parse_expr(expr, expr, &mut diags).unwrap().1;
+
+    let user_def_table = UserDefTable::empty();
+    let mut type_map = TypeMap::new();
+    let mut string_labels = StringLabels::new();
+    let mut sym_table = SymbolTable::new();
+    let mut diags = Vec::new();
+    let mut generic_table = GenericTable::new();
+
+    
+
+    let mut inf_data = InferenceData {
+        sym_table: &mut sym_table,
+        diagnostics: &mut diags,
+        type_map: &mut type_map,
+        user_def_table: &user_def_table,
+        generic_table: &mut generic_table,
+        string_labels: &mut string_labels,
+    };
+
+    assert_eq!(register_field(&res_expr, &mut inf_data), Type::Vec(Box::new(Type::Int)));
+
+    // check the expression tree to ensure it all matches
+    let (cond_branch, then_branch, else_branch) = match res_expr.kind {
+        ExprKind::IfThenElse { condition, then_branch, else_branch } => (condition, then_branch, else_branch),
+        _ => panic!("Expected expression to be if-then-else"),
+    };
+
+    assert_eq!(*type_map.get(&cond_branch.id).unwrap(), Type::Bool);
+    assert_eq!(*type_map.get(&then_branch.id).unwrap(), Type::Vec(Box::new(Type::Int)));
+    assert_eq!(*type_map.get(&else_branch.id).unwrap(), Type::Vec(Box::new(Type::Int)));
+
+
+
+    
+}
+
+
+#[test]
+fn test_map_generic_resolution_sharing() {
+
+    // will verify the types of many things in this expression, which involes
+    // generic resolution
+    let expr = "(map(|x| -> Transition{ edge = x}, Arch.edges())).push(Transition{edge = (Location(0),Location(0))})";
+    let mut diags = Vec::new();
+    let res_expr = parse_expr(expr, expr, &mut diags).unwrap().1;
+
+    let mut field_to_add = HashMap::new();
+    field_to_add.insert("edge".to_string(), Type::Tuple(vec![
+        Type::Location,
+        Type::Location
+    ]));
+
+    let mut user_def_table = UserDefTable::empty();
+    user_def_table.add("Transition".to_string(), field_to_add);
+
+    let mut type_map = TypeMap::new();
+    let mut string_labels = StringLabels::new();
+    let mut sym_table = SymbolTable::new();
+    let mut diags = Vec::new();
+    let mut generic_table = GenericTable::new();
+
+    
+
+    let mut inf_data = InferenceData {
+        sym_table: &mut sym_table,
+        diagnostics: &mut diags,
+        type_map: &mut type_map,
+        user_def_table: &user_def_table,
+        generic_table: &mut generic_table,
+        string_labels: &mut string_labels,
+    };
+
+    assert_eq!(register_field(&res_expr, &mut inf_data), Type::Vec(Box::new(Type::UserDef("Transition".to_string()))));
+
+    // check the expression tree to ensure it all matches
+    let (function, args) = match res_expr.kind {
+        ExprKind::FunctionCall { function, args } => (function, args),
+        _ => panic!("Expected expression to be function call"),
+    };
+
+    assert_eq!(
+        *type_map.get(&function.id).unwrap(), 
+        Type::Function {
+            params: vec![
+                Type::UserDef("Transition".to_string())
+            ],
+            return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string()))))
+        },
+        "Push function signature mismatch"
+    );
+    assert_eq!(args.len(), 1, "Only 1 arg expected passed to push function");
+    assert_eq!(*type_map.get(&args[0].id).unwrap(), Type::UserDef("Transition".to_string()), "Push function arg wasn't as expected");
+
+    let (object, field) = match function.kind {
+        ExprKind::FieldAccess { object, field } => (object, field),
+        _ => panic!("Expected function expression to be field access"),
+    };
+
+    assert_eq!(field, "push");
+    assert_eq!(*type_map.get(&object.id).unwrap(), Type::Vec(Box::new(Type::UserDef("Transition".to_string()))), "Expected push to be called on a Vec");
+
+    let (function, args) = match object.kind {
+        ExprKind::FunctionCall { function, args } => (function, args),
+        _ => panic!("Expected map function call")
+    };
+
+    assert_eq!(
+        *type_map.get(&function.id).unwrap(), 
+        Type::Function {
+            params: vec![
+                Type::Function { 
+                    params: vec![
+                        Type::Tuple(vec![
+                            Type::Location,
+                            Type::Location
+                        ])
+                    ], 
+                    return_type: Box::new(Type::UserDef("Transition".to_string())) 
+                },
+                Type::Vec(Box::new(Type::Tuple(vec![
+                    Type::Location,
+                    Type::Location
+                ])))
+            ],
+            return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string()))))
+        },
+        "Map function didn't evaluate to expected"
+    );
+
+    assert_eq!(args.len(), 2, "Expect 2 args passed to map");
+    assert_eq!(
+        *type_map.get(&args[0].id).unwrap(),
+        Type::Function { 
+            params: vec![
+                Type::Tuple(vec![
+                    Type::Location,
+                    Type::Location
+                ])
+            ], 
+            return_type: Box::new(Type::UserDef("Transition".to_string())) 
+        },
+        "First argument to map was wrong"
+    );
+    assert_eq!(
+        *type_map.get(&args[1].id).unwrap(),
+        Type::Vec(Box::new(Type::Tuple(vec![
+            Type::Location,
+            Type::Location
+        ]))),
+        "Second argument to map was wrong"
+    );
+
+
+    
 }

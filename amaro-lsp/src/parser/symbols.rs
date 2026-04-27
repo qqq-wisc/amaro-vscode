@@ -1,19 +1,22 @@
-use std::{collections::{HashMap, HashSet}, fmt::Write};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Write,
+};
 
 use crate::{ast::TypeAnnotation, parser::FetchAndAdd};
 
 /// The type system for Amaro expressions.
-/// 
+///
 /// Each expression has a Type.
 ///
 /// Represents all possible types that can appear in the language, including
 /// primitives, quantum-specific types, compound types, and function signatures.
-/// 
+///
 /// Some types are special and perhaps obtuse. They are:
 /// - UserDef
 /// - Generic
 /// - Unknown
-/// 
+///
 /// See more about these below.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
@@ -60,7 +63,7 @@ pub enum Type {
     /// the variable used. So, all types that should be type T need to have the
     /// same u8 locally, and all the types that should be type H need to have
     /// the same u8 locally, but distinct from T. Just like normal generics.
-    /// 
+    ///
     /// Throughout the semantic checking process, generics are resolved locally
     /// and conflicts are taken care of. For instance, recognize that the Vec()
     /// function has the type Vec(Generic(0)). So, if I do Vec().push(Vec()),
@@ -68,7 +71,7 @@ pub enum Type {
     /// system, before the generics are resolved. This means conflicts won't
     /// occur with generics of equal values, because generics are resolved
     /// locally and not globally.
-    /// 
+    ///
     /// Warning that there will be issues if there are more than 256 different
     /// generic types in a single expression. Can simply increase from u8 to u16
     /// TODO increase from u8 to u16
@@ -78,10 +81,9 @@ pub enum Type {
     /// uncertain of, OR if a user provides some bad input and we don't wish to
     /// propagate errors. By setting a type as Unknown, we ensure that the
     /// program will be "kind" to the type going forward and not report errors
-    /// about it. 
+    /// about it.
     Unknown,
 }
-
 
 impl Type {
     /// Turns a TypeAnnotation from the parser into a Type that's useable by
@@ -498,15 +500,20 @@ impl UserDefTable {
 
     /// Creates an empty UserDefTable. Useful if it is known that there are no
     /// user-defined types, which really only happens for testing.
-    #[cfg(test)]
     pub fn empty() -> Self {
         Self {
             map: HashMap::new(),
         }
     }
 
+    /// Only used by tests
+    /// TODO: Make this only compile in tests
+    pub fn add(&mut self, name: String, fields: HashMap<String, Type>) {
+        self.map.insert(name, UserDefEntry { fields });
+    }
+
     /// Gets the fields of a user-defined type, if the type has a definition.
-    /// 
+    ///
     /// The returned value, if exists, is a map from field names (strings) to
     /// their associated types.
     pub fn get_fields(&self, identifier: &str) -> Option<&HashMap<String, Type>> {

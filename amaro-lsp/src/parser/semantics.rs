@@ -1,5 +1,8 @@
 use super::symbols::*;
-use crate::{ast::*, info::{builtins, fields}};
+use crate::{
+    ast::*,
+    info::{blocks::BlockName, builtins, fields},
+};
 use std::{
     collections::{HashMap, HashSet},
     ops::Add,
@@ -11,7 +14,7 @@ use tower_lsp::lsp_types::{
 
 pub struct SemanticResult {
     /// Diagnostic information
-    /// 
+    ///
     /// Diagnostics contain errors, warnings, and info that is passed to the
     /// editor to be reported to the user.
     pub diagnostics: Vec<Diagnostic>,
@@ -26,8 +29,8 @@ pub struct SemanticResult {
     /// Information for where to place the "Rust analyzer" style gray type
     /// inferences. Like when typing "let x = 5;", the Rust analyzer extension
     /// shows "let x : i32 = 5;" with the inferred type.
-    /// 
-    /// This can be used to label any strings, but also field names. It can also 
+    ///
+    /// This can be used to label any strings, but also field names. It can also
     /// be used to provide hover information if needed.
     pub string_labels: StringLabels,
 }
@@ -101,8 +104,8 @@ impl TypeMap {
 /// Information for where to place the "Rust analyzer" style gray type
 /// inferences. Like when typing "let x = 5;", the Rust analyzer extension
 /// shows "let x : i32 = 5;" with the inferred type.
-/// 
-/// This can be used to label any strings, but also field names. It can also 
+///
+/// This can be used to label any strings, but also field names. It can also
 /// be used to provide hover information if needed.
 #[derive(Debug, Default)]
 pub struct StringLabels {
@@ -158,7 +161,7 @@ impl StringLabels {
     }
 
     /// Gets all label information available within the provided range.
-    /// 
+    ///
     /// Useful because the LSP wants this information in order to display it to
     /// the user.
     pub fn get_all_labels_in_range(&self, range: &Range) -> Vec<(Range, String, Type)> {
@@ -188,30 +191,10 @@ impl StringLabels {
 ///
 /// Validates block structure, required fields, and type correctness.
 /// Returns diagnostics for LSP clients.
-pub fn check_semantics(
-    file: &AmaroFile,
-) -> SemanticResult {
+pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
     let mut diagnostics = Vec::new();
 
-    let known_blocks = [
-        "GateRealization",
-        "Transition",
-        "Architecture",
-        "Arch",
-        "Step",
-        "RouteInfo",
-        "TransitionInfo",
-        "ArchInfo",
-        "StateInfo",
-    ];
-
-    let mut required_keys: HashMap<&str, Vec<&str>> = HashMap::new();
-    required_keys.insert("RouteInfo", vec!["routed_gates", "realize_gate"]);
-    required_keys.insert("TransitionInfo", vec!["get_transitions", "apply", "cost"]);
-    required_keys.insert("ArchInfo", vec![]);
-    required_keys.insert("StateInfo", vec![]);
-
-    let mut found_blocks: HashMap<String, Range> = HashMap::new();
+    let mut found_blocks: HashMap<BlockName, Range> = HashMap::new();
 
     let user_def_table = UserDefTable::new(file);
     let mut type_map = TypeMap::new();
@@ -220,46 +203,52 @@ pub fn check_semantics(
     // Block Level Validation
     for block in &file.blocks {
         let block_name = block.kind.as_str();
-        let lower_name = block_name.to_lowercase();
 
-        // 1. Capitalization Check
-        if let Some(correct_name) = known_blocks
-            .iter()
-            .find(|&&kb| kb.eq_ignore_ascii_case(block_name))
-            && block_name != *correct_name
-        {
-            diagnostics.push(Diagnostic {
-                range: block.range,
-                severity: Some(DiagnosticSeverity::WARNING),
-                message: format!(
-                    "Block '{}' should be Capitalized (e.g., '{}').",
-                    block_name, correct_name
-                ),
-                ..Default::default()
-            });
-        }
+        let block_name = match BlockName::from_string(block_name) {
+            None => {
+                // show diagnostic error that this is not a valid block name
+                diagnostics.push(Diagnostic {
+                    range: block.range,
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("Semantic".to_string()),
+                    message: format!(
+                        "Block name '{}' is invalid. Valid block names are as follows: {:?}",
+                        block_name,
+                        BlockName::get_all_blocks()
+                    ),
+                    ..Default::default()
+                });
 
-        // 2. Uniqueness Check
-        if let Some(first_range) = found_blocks.get(&lower_name) {
+                // dont look at anything else in this block
+                continue;
+            }
+            Some(block_name) => block_name,
+        };
+
+        // 1. Check for existence of blocks and uniqueness
+        if let Some(first_range) = found_blocks.insert(block_name, block.range) {
             diagnostics.push(Diagnostic {
                 range: block.range,
                 severity: Some(DiagnosticSeverity::ERROR),
-                message: format!("Duplicate definition of '{}' block.", block_name),
+                message: format!(
+                    "Duplicate definition of '{}' block.",
+                    block_name.to_string()
+                ),
+
                 related_information: Some(vec![DiagnosticRelatedInformation {
-                    location: Location {
-                        uri: Url::parse("file:///previous/definition")
-                            .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
-                        range: *first_range,
-                    },
-                    message: "First defined here".to_string(),
-                }]),
+                        location: Location {
+                            uri: Url::parse("file:///previous/definition") // ??? is this a valid URL? 
+                            // this seems like maybe needs to be replaced with something valid
+                                .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()), // ?????
+                            range: first_range,
+                        },
+                        message: "First defined here".to_string(),
+                    }]),
                 ..Default::default()
             });
-        } else {
-            found_blocks.insert(lower_name, block.range);
         }
 
-        // 3. Type Check all fields
+        // 2. Type Check all fields
         let mut sym_table = SymbolTable::new();
 
         let mut present_keys: Vec<&str> = Vec::new();
@@ -287,9 +276,10 @@ pub fn check_semantics(
                 present_keys.push(field.key.as_str());
 
                 // 3.1. Gate Validation in 'routed_gates' fields
-                if block_name == "RouteInfo" && field.key == "routed_gates" {
-                    validate_gates(&field.value, &mut diagnostics);
-                }
+                // no longer necessary, should check field types below
+                // if block_name == "RouteInfo" && field.key == "routed_gates" {
+                //     validate_gates(&field.value, &mut diagnostics);
+                // }
 
                 let mut generic_table: GenericTable = GenericTable::new();
 
@@ -308,18 +298,14 @@ pub fn check_semantics(
 
                 // 3.2. Enforce types on all fields
                 // Additionally, use the field type to help inform the expression type.
-                
+
                 // get the expected type of the field based off the field name
                 if let Some(field_info) = fields::field_lookup(block_name, &field.key) {
-
                     // so, we found the type for the field. destructure to
                     // function type since all fields should be this
                     if let Type::Function { return_type, .. } = &field_info.typ {
-                        
-
                         // need that the return type is compatible with the provided
                         if field_type != Type::Unknown {
-
                             // first, try to overlay the types
 
                             if overlay_type(&mut field_type, return_type) {
@@ -350,98 +336,112 @@ pub fn check_semantics(
                                     severity: Some(DiagnosticSeverity::ERROR),
                                     message: format!(
                                         "Field '{}' in {} must return {}, got '{}'.",
-                                        field.key, block_name, return_type, field_type
+                                        field.key,
+                                        block_name.to_string(),
+                                        return_type,
+                                        field_type
                                     ),
                                     ..Default::default()
                                 });
                             }
                         }
-                    
+
                         // add the field to string labels
-                        string_labels.identify_label(&field.key_range, field.key.clone(), (**return_type).clone());
-
+                        string_labels.identify_label(
+                            &field.key_range,
+                            field.key.clone(),
+                            (**return_type).clone(),
+                        );
                     }
-                }else {
-                        // unknown field
-                        // show message to user but don't error, we might just
-                        // not have the builtin
-                        diagnostics.push(Diagnostic {
-                            range: field.key_range,
-                            severity: Some(DiagnosticSeverity::INFORMATION),
-                            message: format!("Unknown field '{}' in {}", field.key, block_name),
-                            ..Default::default()
-                        });
-                    }
-                
-            }
-        }
-
-        // 4. Required Keys Check
-        if let Some(reqs) = required_keys.get(block_name) {
-            for req in reqs {
-                if !present_keys.contains(req) {
+                } else {
+                    // unknown field
+                    // show message to user but don't error, we might just
+                    // not have the builtin
                     diagnostics.push(Diagnostic {
-                        range: block.range,
-                        severity: Some(DiagnosticSeverity::ERROR),
+                        range: field.key_range,
+                        severity: Some(DiagnosticSeverity::INFORMATION),
                         message: format!(
-                            "Block '{}' is missing required field: '{}'",
-                            block_name, req
+                            "Unknown field '{}' in {}",
+                            field.key,
+                            block_name.to_string()
                         ),
                         ..Default::default()
                     });
                 }
             }
         }
+
+        // ensure block has all the mandatory fields
+        fields::get_all_fields_under(block_name) // get all fields for this block
+            .filter(|elt| elt.mandatory_if_block_present) // filter to just mandatory
+            .map(|elt| &elt.field_name) // map to just the name of the mandatory
+            .filter(|name| !present_keys.contains(&name.as_str())) // filter to lacking
+            .for_each(|name| {
+                diagnostics.push(Diagnostic {
+                    range: block.range,
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("Semantic".to_string()),
+                    message: format!(
+                        "Block '{}' is missing required field: '{}'",
+                        block_name.to_string(),
+                        name
+                    ),
+                    ..Default::default()
+                });
+            });
     }
 
-    // 5. Mandatory Blocks Check
-    let required_blocks = ["RouteInfo", "TransitionInfo"];
-    for req in required_blocks {
-        if !found_blocks.contains_key(&req.to_lowercase()) {
+    // 4. Mandatory Blocks Check
+    for req_block in BlockName::get_mandatory_blocks() {
+        if !found_blocks.contains_key(&req_block) {
             diagnostics.push(Diagnostic {
                 range: Range::default(),
                 severity: Some(DiagnosticSeverity::ERROR),
-                message: format!("Missing mandatory block: '{}'.", req),
+                message: format!("Missing mandatory block: '{}'.", req_block.to_string()),
                 ..Default::default()
             });
         }
     }
 
-    SemanticResult {diagnostics, type_map: type_map.map, user_def_table, string_labels }
-}
-
-/// Validates that gate identifiers are recognized gate types (CX, T, Pauli, PauliMeasurement).
-fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
-    let valid_gates = ["CX", "T", "Pauli", "PauliMeasurement"];
-
-    match &expr.kind {
-        ExprKind::Identifier(name) => {
-            if !valid_gates.contains(&name.as_str()) {
-                diagnostics.push(Diagnostic {
-                    range: expr.range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    message: format!(
-                        "'{}' is not a recognized standard gate. Expected one of: {}",
-                        name,
-                        valid_gates.join(", ")
-                    ),
-                    ..Default::default()
-                });
-            }
-        }
-        ExprKind::List(items) | ExprKind::Tuple(items) => {
-            for item in items {
-                validate_gates(item, diagnostics);
-            }
-        }
-        _ => {}
+    SemanticResult {
+        diagnostics,
+        type_map: type_map.map,
+        user_def_table,
+        string_labels,
     }
 }
 
+// Validates that gate identifiers are recognized gate types (CX, T, Pauli, PauliMeasurement).
+// fn validate_gates(expr: &Expr, diagnostics: &mut Vec<Diagnostic>) {
+//     let valid_gates = ["CX", "T", "Pauli", "PauliMeasurement"];
+
+//     match &expr.kind {
+//         ExprKind::Identifier(name) => {
+//             if !valid_gates.contains(&name.as_str()) {
+//                 diagnostics.push(Diagnostic {
+//                     range: expr.range,
+//                     severity: Some(DiagnosticSeverity::WARNING),
+//                     message: format!(
+//                         "'{}' is not a recognized standard gate. Expected one of: {}",
+//                         name,
+//                         valid_gates.join(", ")
+//                     ),
+//                     ..Default::default()
+//                 });
+//             }
+//         }
+//         ExprKind::List(items) | ExprKind::Tuple(items) => {
+//             for item in items {
+//                 validate_gates(item, diagnostics);
+//             }
+//         }
+//         _ => {}
+//     }
+// }
 
 /// Given the background_type and foreground_type are correspondent,
 /// replaces unknowns in the background type with the values from the foreground type.
-/// 
+///
 /// Returns true if anything was changed in the background type, false otherwise.
 pub fn overlay_unknowns(background_type: &mut Type, foreground_type: &Type) -> bool {
     match background_type {
@@ -694,7 +694,7 @@ impl GenericTable {
                     self.viewing_set.remove(&generic_num);
                     match res {
                         Ok(_) => Ok(()),
-                        Err(_) => Err(existing_type)
+                        Err(_) => Err(existing_type),
                     }
                 } else {
                     Ok(())
@@ -1019,7 +1019,6 @@ pub fn apply_generic_info(expr: &Expr, inference_data: &mut InferenceData) {
     }
 }
 
-
 /// Given a field, registers all its info. Recursively and repeatedly does type
 /// inference until there is nothing else to gather.
 ///
@@ -1316,15 +1315,26 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             // inference_data.generic_table.find_generics_in_correspondent_types(&then_type, &else_type);
             let overlayed_dir_1 = overlay_unknowns(&mut then_type, &else_type);
             let overlayed_dir_2 = overlay_unknowns(&mut else_type, &then_type);
-            inference_data.generic_table.find_generics_in_correspondent_types(&then_type, &else_type);
+            match inference_data
+                .generic_table
+                .find_generics_in_correspondent_types(&then_type, &else_type)
+            {
+                Ok(_) => {}
+                Err(incompatibilities) => {
+                    inference_data.diagnostics.push(Diagnostic {
+                            range: expr.range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: format!("Then and else branches of if-then-else must have compatible types. Then: {}, Else: {}. There were this incompatibilities: {:?}", then_type, else_type, incompatibilities),
+                            ..Default::default()
+                        });
+                }
+            }
 
             if overlayed_dir_1 {
                 retype(then_branch, then_type.clone(), inference_data);
-                eprintln!("Overlayed from else onto then");
             }
             if overlayed_dir_2 {
                 retype(else_branch, else_type.clone(), inference_data);
-                eprintln!("Overlayed from then onto else");
             }
 
             if overlayed_dir_1 || overlayed_dir_2 {
@@ -1820,7 +1830,6 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
             }
         }
     };
-
 
     // at this point, we have the found_type and resolved values
     // overlay the found_type in the type_map, meaning it will insert if nothing

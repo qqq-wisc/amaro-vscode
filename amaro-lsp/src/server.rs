@@ -6,9 +6,11 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
-use crate::info::{builtins, fields};
+use crate::info::{blocks, builtins, fields};
 use crate::parser::symbols::{Type, UserDefTable};
-use crate::parser::{ParseOutput, SemanticResult, StringLabels, check_semantics, parse_file, semantics, utils};
+use crate::parser::{
+    ParseOutput, SemanticResult, StringLabels, check_semantics, parse_file, semantics, utils,
+};
 
 #[derive(Debug)]
 pub struct CachedParse {
@@ -30,11 +32,9 @@ pub fn build_document_symbols(file: &AmaroFile) -> Vec<DocumentSymbol> {
     file.blocks
         .iter()
         .map(|block| {
-            let kind = match block.kind.as_str() {
-                "GateRealization" | "Transition" | "Architecture" | "Arch" => SymbolKind::CLASS,
-                "Step" => SymbolKind::FUNCTION,
-                "RouteInfo" | "TransitionInfo" | "ArchInfo" | "StateInfo" => SymbolKind::MODULE,
-                _ => SymbolKind::OBJECT,
+            let kind = match blocks::BlockName::from_string(&block.kind) {
+                Some(_) => SymbolKind::CLASS,
+                None => SymbolKind::OBJECT, // bad block
             };
 
             #[allow(deprecated)]
@@ -412,7 +412,10 @@ impl Backend {
 
         // Syntactic Analysis
         match parse_file(&text) {
-            Ok(ParseOutput{ file, diagnostics: parse_diags }) => {
+            Ok(ParseOutput {
+                file,
+                diagnostics: parse_diags,
+            }) => {
                 diagnostics.extend(parse_diags);
                 // Semantic Checks
                 // #[cfg(debug_assertions)]
@@ -425,7 +428,7 @@ impl Backend {
                     diagnostics: mut semantic_errors,
                     type_map,
                     user_def_table,
-                    string_labels
+                    string_labels,
                 } = check_semantics(&file);
 
                 self.parse_cache.write().await.insert(
@@ -539,7 +542,11 @@ impl LanguageServer for Backend {
             None => return Ok(None),
         };
 
-        if let Ok(ParseOutput{file, diagnostics: _parse_diagnostics}) = parse_file(text) {
+        if let Ok(ParseOutput {
+            file,
+            diagnostics: _parse_diagnostics,
+        }) = parse_file(text)
+        {
             let symbols = build_document_symbols(&file);
             return Ok(Some(DocumentSymbolResponse::Nested(symbols)));
         }
@@ -550,6 +557,28 @@ impl LanguageServer for Backend {
     // triggers autocomplete
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         // get the text doc
+        let completion_context = match params.context {
+            None => {
+                eprintln!("No completion context, can't complete");
+                return Ok(None);
+            } // only have trigger character completion
+            Some(i) => i,
+        };
+        if !matches!(
+            completion_context.trigger_kind,
+            CompletionTriggerKind::TRIGGER_CHARACTER
+        ) {
+            eprintln!("Completion trigger wasn't trigger character, can't complete");
+            return Ok(None); // only have trigger character completion
+        }
+        let trigger_char = match completion_context.trigger_character {
+            Some(i) => i,
+            None => {
+                eprintln!("Completion character didn't exist, can't complete");
+                return Ok(None);
+            } // only have trigger character completion
+        };
+
         let uri = params.text_document_position.text_document.uri;
         let content_guard = self.documents.read().await;
         let file_content = content_guard.get(&uri);
@@ -557,20 +586,28 @@ impl LanguageServer for Backend {
         if file_content.is_none() {
             return Err(Error::new(ErrorCode::InvalidRequest));
         }
-        let string_content = file_content.unwrap();
 
         // get original position of cursor. this is after the dot.
         let orig_pos = params.text_document_position.position;
 
         let char_before_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(1));
 
-        // determine if . was typed
-        match utils::get_char_at(string_content, char_before_pos) {
-            None => Ok(None),
-            Some('.') => self.dot_autocomplete(uri, char_before_pos).await, // matched the dot!
-            Some('#') => self.hash_autocomplete(char_before_pos),
-            Some(_) => Ok(None),
+        match trigger_char.as_str() {
+            "." => self.dot_autocomplete(uri, char_before_pos).await,
+            "#" => self.hash_autocomplete(char_before_pos),
+            _ => {
+                eprintln!("Trigger char was {}, skipping", trigger_char);
+                Ok(None)
+            }
         }
+
+        // // determine if . was typed
+        // match utils::get_char_at(string_content, char_before_pos) {
+        //     None => Ok(None),
+        //     Some('.') => self.dot_autocomplete(uri, char_before_pos).await, // matched the dot!
+        //     Some('#') => self.hash_autocomplete(char_before_pos),
+        //     Some(_) => Ok(None),
+        // }
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -591,34 +628,32 @@ impl LanguageServer for Backend {
         // get original position of cursor. this is after the dot.
         let orig_pos = params.text_document_position_params.position;
 
-        
-
         // first, check field names.
         // this is necessary to come before the strings for hover, since fields
         // are also in the string_labels section.
         let hovered_field = utils::field_name_containing(amaro_file, orig_pos);
 
-        if let Some((block_name, field_name, field_range)) = hovered_field {
+        if let Some((block_str_name, field_name, field_range)) = hovered_field {
             // need to lookup the name
-            if let Some(field_info) =
-                fields::field_lookup(block_name.as_str(), field_name.as_str())
-            {
-                return Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: field_info.show_details(),
-                    }),
-                    range: Some(field_range),
-                }));
+            if let Some(block_name) = blocks::BlockName::from_string(&block_str_name) {
+                if let Some(field_info) = fields::field_lookup(block_name, field_name.as_str()) {
+                    return Ok(Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: field_info.show_details(),
+                        }),
+                        range: Some(field_range),
+                    }));
+                } else {
+                    // we are done. if we are hovered over a field but we don't
+                    // have an entry, then there's nothing to show
+                    return Ok(None);
+                }
             } else {
-                // we are done. if we are hovered over a field but we don't
-                // have an entry, then there's nothing to show...
-                // LS: Would be good to display something indicating that the
-                // thing we are hovering over is not recognized by the program
+                // not a valid block, no fields to lookup
                 return Ok(None);
             }
         }
-
 
         // second, check the strings for hover (for instance, the labels in
         // lambdas)
@@ -713,16 +748,27 @@ impl Backend {
         match containing_expr {
             // if we had an expression containing our goal pos...
             Ok(e) => {
+                eprintln!("\tFound expression containing the pos before the dot");
                 // now, need to find the expr right before our cursor, and get
                 // the type of that one.
-                match utils::find_finishing_subexpr(e, dot_pos) {
+                match utils::find_finishing_subexpr(
+                    e,
+                    Position::new(dot_pos.line, dot_pos.character.saturating_add(1)),
+                ) {
+                    // TODO explain why we're using this position here...
                     Some(perfect_end_expr) => {
                         // self.client
                         //     .log_message(
                         //         MessageType::INFO,
-                        //         format!("\tFound perfectly finishing expression {}", perfect_end_expr.kind),
+                        //         format!("\tAt dot pos {:?}, found perfectly finishing expression {}", dot_pos,perfect_end_expr.summarize()),
                         //     )
                         //     .await;
+
+                        eprintln!(
+                            "\t At dot pos {:?}, found perfectly finishing expression {}",
+                            dot_pos,
+                            perfect_end_expr.summarize()
+                        );
 
                         // get the types and stuff
                         let found_type = match cached_parse.type_map.get(&perfect_end_expr.id) {
@@ -733,7 +779,7 @@ impl Backend {
                         // self.client
                         //     .log_message(
                         //         MessageType::INFO,
-                        //         format!("\tHas type {:?}", found_type),
+                        //         format!("\tExpr has type type {:?}", found_type),
                         //     )
                         //     .await;
 
@@ -746,7 +792,10 @@ impl Backend {
                         }
                     }
                     // expression doesn't end at anything
-                    None => Ok(None),
+                    None => {
+                        eprintln!("\tThe found expression has no perfect end {:?}", dot_pos);
+                        Ok(None)
+                    }
                 }
             }
             // if we lacked an expression containing our goal pos...

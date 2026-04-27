@@ -1,6 +1,7 @@
 RouteInfo:
     routed_gates = CX, T
     GateRealization{path : Vec<Location>}
+    info = map(|x| -> x, Arch.alg_qubits())
     realize_gate = 
     if (Gate.gate_type()) == CX 
         then 
@@ -19,7 +20,7 @@ RouteInfo:
                           ((values(State.map()))
                           .extend(Arch.magic_state_qubits()))
                           .extend(fold(Vec(), |x, acc| -> acc.extend(x),
-                           map(|x| -> x.implementation.(path()), State.implemented_gates())))))
+                           map(|x| -> x.implementation.path, State.implemented_gates())))))
  
 
 TransitionInfo:

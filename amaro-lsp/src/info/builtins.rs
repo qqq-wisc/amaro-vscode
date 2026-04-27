@@ -2,16 +2,12 @@
 /// map, but also functions like .contains on a Vec. Also just types too, like Arch.
 /// No hard-coding of built-in functions should take place except for in here.
 /// Then, if later plans change about the types, only this needs to be modified.
-
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, MarkupContent,
 };
 
-use crate::parser::{FetchAndAdd, GenericTable, semantics, symbols::Type};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::OnceLock,
-};
+use crate::parser::{GenericTable, symbols::Type};
+use std::sync::OnceLock;
 
 pub enum Owner<'a, T> {
     Owned(T),
@@ -21,7 +17,6 @@ pub enum Owner<'a, T> {
 /// Global, persistent location where the built-ins are kept. They do not change
 /// between different files.
 static BUILTINS: OnceLock<Vec<(Option<Type>, Vec<BuiltIn>)>> = OnceLock::new();
-
 
 /// Given an identifier, gets the "raw" built-in associated with it.
 /// A "raw" built-in is something (usually a function) that is pre-defined
@@ -57,11 +52,11 @@ pub fn get_all_raw_built_ins() -> Vec<&'static BuiltIn> {
 /// Gets all the built-ins that come after a type. Good for suggestions.
 /// For instance, if the type is Vec, then this gives the built-ins for the
 /// contains, push, and pop functions, along with the others.
-/// 
+///
 /// This DOES convert to generic types. Meaning, if the given type is Vec<Gate>,
 /// then the contains, push, and pop functions will provide built-in information
 /// with the proper typing.
-/// 
+///
 /// Notice the output type is Option<Owner<Vec<BuiltIn>>>
 /// Option -> might not have any built-ins after the type
 /// Owner -> if there are no generics, then the Vec can be borrowed from the
@@ -99,14 +94,12 @@ pub fn get_all_built_ins_after_type(t1: &Type) -> Option<Owner<'static, Vec<Buil
                 Some(Owner::Owned(
                     pair.0
                         .iter()
-                        .map(|elt| 
-                            BuiltIn {
-                                parent_type: elt.parent_type.clone(),
-                                identifier: elt.identifier.clone(),
-                                typ: pair.1.try_degenerisize(&elt.typ),
-                                details: elt.details.clone(),
-                            }
-                        )
+                        .map(|elt| BuiltIn {
+                            parent_type: elt.parent_type.clone(),
+                            identifier: elt.identifier.clone(),
+                            typ: pair.1.try_degenerisize(&elt.typ),
+                            details: elt.details.clone(),
+                        })
                         .collect(),
                 ))
             }
@@ -118,11 +111,11 @@ pub fn get_all_built_ins_after_type(t1: &Type) -> Option<Owner<'static, Vec<Buil
 /// For instance, if t1 is Arch and identifier is width, check if Arch.width
 /// is a valid built-in (which, it is!). If it is, provides the BuiltIn info.
 /// Otherwise, gives None.
-/// 
+///
 /// This DOES convert to generic types. Meaning, if the given type is Vec<Gate>,
 /// then the contains, push, and pop functions will provide built-in information
 /// with the proper typing.
-/// 
+///
 /// Notice the output type is Option<Owner<BuiltIn>>
 /// Option -> might not have any built-ins after the type
 /// Owner -> if there are no generics, then the BuiltIn can be borrowed from the
@@ -140,23 +133,21 @@ pub fn check_built_in_after_type(t1: &Type, identifier: &str) -> Option<Owner<'s
         }
     }) {
         None => None, // did not find assoc type in our data
-        Some((built_in_vec, table)) => {
-            built_in_vec
-                .iter()
-                .find(|elt| elt.identifier == identifier)
-                .map(|found| {
-                    if !table.is_dirty() {
-                        Owner::Borrowed(found)
-                    } else {
-                        Owner::Owned(BuiltIn {
-                            parent_type: Some(t1.clone()),
-                            identifier: identifier.to_string(),
-                            typ: table.try_degenerisize(&found.typ),
-                            details: found.details.clone(),
-                        })
-                    }
-                })
-        }
+        Some((built_in_vec, table)) => built_in_vec
+            .iter()
+            .find(|elt| elt.identifier == identifier)
+            .map(|found| {
+                if !table.is_dirty() {
+                    Owner::Borrowed(found)
+                } else {
+                    Owner::Owned(BuiltIn {
+                        parent_type: Some(t1.clone()),
+                        identifier: identifier.to_string(),
+                        typ: table.try_degenerisize(&found.typ),
+                        details: found.details.clone(),
+                    })
+                }
+            }),
     }
 }
 
@@ -1300,5 +1291,4 @@ mod tests {
             );
         }
     }
-
 }

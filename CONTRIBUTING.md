@@ -28,12 +28,12 @@ The LSP follows a three-stage pipeline:
 - Checks required fields (`routed_gates`, `realize_gate`, etc.)
 - Performs type inference on all expressions
 - Emits diagnostics (errors and warnings)
+- 
 
 **Stage 3: Symbol Table (`parser/symbols.rs`)**
 - Tracks variable bindings and their types
-- Manages scopes (global, let-bindings, lambda parameters)
-- Contains all built-in functions and type constructors
-- Handles type compatibility checks
+- Manages scopes (let-bindings, lambda parameters)
+- Handles some type compatibility checks
 
 ## Development Setup
 
@@ -168,20 +168,25 @@ TransitionInfo:
 
 ### Adding a New Block Type
 
-1. **Add validation rules in `semantics.rs`:**
+1. **Recognize new block in `blocks.rs`:**
    ```rust
-   let known_blocks = [
-       "RouteInfo", "TransitionInfo", "ArchInfo", "StateInfo",
-       "MyNewBlock"  // Add here
-   ];
-   
-   // Add required fields
-   required_keys.insert("MyNewBlock", vec!["field1", "field2"]);
+   pub enum BlockName {
+    Transition, Route, Arch, State,
+    MyNewBlock  // Add here
+   }
    ```
 
 2. **Add the block to mandatory checks if needed:**
    ```rust
-   let required_blocks = ["RouteInfo", "TransitionInfo", "MyNewBlock"];
+   pub fn is_mandatory(self) -> bool {
+        match self {
+            BlockName::Transition => true,
+            BlockName::Route => true,
+            BlockName::Arch => false,
+            BlockName::State => false,
+            BlockName::MyNewBlock => true,
+        }
+    }
    ```
 
 3. **Add tests to verify validation works.**
@@ -236,13 +241,18 @@ amaro-vscode/
     │   ├── main.rs           # LSP server entry point
     │   ├── server.rs         # LSP protocol implementation
     │   ├── ast.rs            # AST definitions
-    │   └── parser/
-    │       ├── mod.rs        # Parser module exports
-    │       ├── core.rs       # Block and top-level parsing
-    │       ├── expr.rs       # Expression parsing
-    │       ├── symbols.rs    # Symbol table and type system
-    │       ├── semantics.rs  # Type inference and validation
-    │       └── utils.rs      # Helper functions
+    │   ├── parser/
+    │   │   ├── mod.rs        # Parser module exports
+    │   │   ├── core.rs       # Block and top-level parsing
+    │   │   ├── expr.rs       # Expression parsing
+    │   │   ├── symbols.rs    # Symbol table and type system
+    │   │   ├── semantics.rs  # Type inference and validation
+    │   │   └── utils.rs      # Helper functions
+    │   └── info/
+    │       ├── mod.rs        # Info module exports
+    │       ├── builtins.rs   # Data for built-in functions and types
+    │       ├── fields.rs     # Data for expected fields (key-value pairs)
+    │       └── blocks.rs     # Data for expected blocks
     └── tests/
         ├── parser_tests.rs   # Parser tests
         ├── semantic_tests.rs # Semantic analysis tests
@@ -279,6 +289,12 @@ amaro-vscode/
 - Performs type inference on expressions
 - Checks type compatibility
 - Generates LSP diagnostics
+
+**`info`**
+- Contains language-specific information beyond syntax
+- Details block names and block requirements
+- Details field names and their expected types
+- Lists built-in functions provided by the language
 
 **`server.rs`**
 - Implements LSP protocol handlers
