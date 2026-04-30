@@ -2002,10 +2002,10 @@ pub fn suggest_next_from_type(
             }
         }
         Type::UserDef(name) => user_def_table.get_fields(name).map(|hashmap| {
-            hashmap
+            let mut lot: Vec<CompletionItem> = hashmap
                 .iter()
                 .map(|entry| CompletionItem {
-                    label: entry.0.clone(),
+                    label: format!("({}())", entry.0), // best practice for autocomplete, since language prefers this
                     label_details: Some(CompletionItemLabelDetails {
                         detail: None,
                         description: Some(format!("{}", entry.1)),
@@ -2014,7 +2014,24 @@ pub fn suggest_next_from_type(
                     detail: None,
                     ..Default::default()
                 })
-                .collect()
+                .collect();
+
+            // userdefs could have built-ins too. a little repeat which i dont
+            // enjoy though.
+            if let Some(built_ins) = builtins::get_all_built_ins_after_type(t1) {
+                match built_ins {
+                    // TODO: I do not like this ownership structure I created in
+                    // fighting the borrow checker.
+                    builtins::Owner::Owned(vec) => {
+                        lot.extend(vec.iter().map(|elt| elt.to_completion_item(None)))
+                    }
+                    builtins::Owner::Borrowed(vec) => {
+                        lot.extend(vec.iter().map(|elt| elt.to_completion_item(None)))
+                    }
+                }
+            }
+
+            lot
         }),
         _ => {
             // all other types, we need to check if there are any built-ins

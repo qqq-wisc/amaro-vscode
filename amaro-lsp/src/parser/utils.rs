@@ -200,14 +200,13 @@ pub fn find_finishing_subexpr(expr: &Expr, goal_position: Position) -> Option<&E
     while let Some(current) = exprs_to_check.pop_front() {
         if current.range.end == goal_position || current.range.end == pos_before_goal {
             best_expr = Some(current);
-            eprintln!("\t\t\tUpdating best to {}", current.summarize());
+
             // we just take the most recent expression as the best one.
             // this is because our system here automatically evaluates from
             // largest to smallest, so we always know the most recent expression
             // we find will be the best.
         }
         if current.range.start <= goal_position && current.range.end >= goal_position {
-            eprintln!("\t\tInvestigating {}", current.summarize());
             match &current.kind {
                 ExprKind::List(exprs) => exprs_to_check.extend(exprs),
                 ExprKind::Tuple(exprs) => exprs_to_check.extend(exprs),
@@ -260,10 +259,12 @@ pub fn find_finishing_subexpr(expr: &Expr, goal_position: Position) -> Option<&E
                 | ExprKind::None => { /* cant descend further */ }
             }
         } else {
-            eprintln!(
-                "\t\tREJECT: Start {:?} end {:?} goal {:?}",
-                current.range.start, current.range.end, goal_position
-            )
+            // reject
+
+            // eprintln!(
+            //     "\t\tREJECT: Start {:?} end {:?} goal {:?}",
+            //     current.range.start, current.range.end, goal_position
+            // )
         }
     }
 

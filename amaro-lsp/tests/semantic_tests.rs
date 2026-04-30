@@ -1,10 +1,12 @@
-
 use std::collections::HashMap;
 
 use amaro_lsp::ast::*;
 use amaro_lsp::parser::expr::parse_expr;
 use amaro_lsp::parser::symbols::{SymbolTable, Type, UserDefTable};
-use amaro_lsp::parser::{GenericTable, InferenceData, StringLabels, TypeMap, check_semantics, overlay_type, parse_file, register_field};
+use amaro_lsp::parser::{
+    GenericTable, InferenceData, StringLabels, TypeMap, check_semantics, overlay_type, parse_file,
+    register_field,
+};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 const MOCK_MANDATORY_BLOCKS: &str = r#"
@@ -1741,7 +1743,6 @@ fn test_overlay_complex() {
     assert_eq!(t1, half_match_expected_out);
 }
 
-
 #[test]
 fn test_if_then_else_information_sharing() {
     let expr = "if x > 5 then Vec().push(5) else Vec()";
@@ -1755,8 +1756,6 @@ fn test_if_then_else_information_sharing() {
     let mut diags = Vec::new();
     let mut generic_table = GenericTable::new();
 
-    
-
     let mut inf_data = InferenceData {
         sym_table: &mut sym_table,
         diagnostics: &mut diags,
@@ -1766,27 +1765,34 @@ fn test_if_then_else_information_sharing() {
         string_labels: &mut string_labels,
     };
 
-    assert_eq!(register_field(&res_expr, &mut inf_data), Type::Vec(Box::new(Type::Int)));
+    assert_eq!(
+        register_field(&res_expr, &mut inf_data),
+        Type::Vec(Box::new(Type::Int))
+    );
 
     // check the expression tree to ensure it all matches
     let (cond_branch, then_branch, else_branch) = match res_expr.kind {
-        ExprKind::IfThenElse { condition, then_branch, else_branch } => (condition, then_branch, else_branch),
+        ExprKind::IfThenElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => (condition, then_branch, else_branch),
         _ => panic!("Expected expression to be if-then-else"),
     };
 
     assert_eq!(*type_map.get(&cond_branch.id).unwrap(), Type::Bool);
-    assert_eq!(*type_map.get(&then_branch.id).unwrap(), Type::Vec(Box::new(Type::Int)));
-    assert_eq!(*type_map.get(&else_branch.id).unwrap(), Type::Vec(Box::new(Type::Int)));
-
-
-
-    
+    assert_eq!(
+        *type_map.get(&then_branch.id).unwrap(),
+        Type::Vec(Box::new(Type::Int))
+    );
+    assert_eq!(
+        *type_map.get(&else_branch.id).unwrap(),
+        Type::Vec(Box::new(Type::Int))
+    );
 }
-
 
 #[test]
 fn test_map_generic_resolution_sharing() {
-
     // will verify the types of many things in this expression, which involes
     // generic resolution
     let expr = "(map(|x| -> Transition{ edge = x}, Arch.edges())).push(Transition{edge = (Location(0),Location(0))})";
@@ -1794,10 +1800,10 @@ fn test_map_generic_resolution_sharing() {
     let res_expr = parse_expr(expr, expr, &mut diags).unwrap().1;
 
     let mut field_to_add = HashMap::new();
-    field_to_add.insert("edge".to_string(), Type::Tuple(vec![
-        Type::Location,
-        Type::Location
-    ]));
+    field_to_add.insert(
+        "edge".to_string(),
+        Type::Tuple(vec![Type::Location, Type::Location]),
+    );
 
     let mut user_def_table = UserDefTable::empty();
     user_def_table.add("Transition".to_string(), field_to_add);
@@ -1808,8 +1814,6 @@ fn test_map_generic_resolution_sharing() {
     let mut diags = Vec::new();
     let mut generic_table = GenericTable::new();
 
-    
-
     let mut inf_data = InferenceData {
         sym_table: &mut sym_table,
         diagnostics: &mut diags,
@@ -1819,7 +1823,10 @@ fn test_map_generic_resolution_sharing() {
         string_labels: &mut string_labels,
     };
 
-    assert_eq!(register_field(&res_expr, &mut inf_data), Type::Vec(Box::new(Type::UserDef("Transition".to_string()))));
+    assert_eq!(
+        register_field(&res_expr, &mut inf_data),
+        Type::Vec(Box::new(Type::UserDef("Transition".to_string())))
+    );
 
     // check the expression tree to ensure it all matches
     let (function, args) = match res_expr.kind {
@@ -1828,17 +1835,19 @@ fn test_map_generic_resolution_sharing() {
     };
 
     assert_eq!(
-        *type_map.get(&function.id).unwrap(), 
+        *type_map.get(&function.id).unwrap(),
         Type::Function {
-            params: vec![
-                Type::UserDef("Transition".to_string())
-            ],
+            params: vec![Type::UserDef("Transition".to_string())],
             return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string()))))
         },
         "Push function signature mismatch"
     );
     assert_eq!(args.len(), 1, "Only 1 arg expected passed to push function");
-    assert_eq!(*type_map.get(&args[0].id).unwrap(), Type::UserDef("Transition".to_string()), "Push function arg wasn't as expected");
+    assert_eq!(
+        *type_map.get(&args[0].id).unwrap(),
+        Type::UserDef("Transition".to_string()),
+        "Push function arg wasn't as expected"
+    );
 
     let (object, field) = match function.kind {
         ExprKind::FieldAccess { object, field } => (object, field),
@@ -1846,30 +1855,26 @@ fn test_map_generic_resolution_sharing() {
     };
 
     assert_eq!(field, "push");
-    assert_eq!(*type_map.get(&object.id).unwrap(), Type::Vec(Box::new(Type::UserDef("Transition".to_string()))), "Expected push to be called on a Vec");
+    assert_eq!(
+        *type_map.get(&object.id).unwrap(),
+        Type::Vec(Box::new(Type::UserDef("Transition".to_string()))),
+        "Expected push to be called on a Vec"
+    );
 
     let (function, args) = match object.kind {
         ExprKind::FunctionCall { function, args } => (function, args),
-        _ => panic!("Expected map function call")
+        _ => panic!("Expected map function call"),
     };
 
     assert_eq!(
-        *type_map.get(&function.id).unwrap(), 
+        *type_map.get(&function.id).unwrap(),
         Type::Function {
             params: vec![
-                Type::Function { 
-                    params: vec![
-                        Type::Tuple(vec![
-                            Type::Location,
-                            Type::Location
-                        ])
-                    ], 
-                    return_type: Box::new(Type::UserDef("Transition".to_string())) 
+                Type::Function {
+                    params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
+                    return_type: Box::new(Type::UserDef("Transition".to_string()))
                 },
-                Type::Vec(Box::new(Type::Tuple(vec![
-                    Type::Location,
-                    Type::Location
-                ])))
+                Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location])))
             ],
             return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string()))))
         },
@@ -1879,26 +1884,15 @@ fn test_map_generic_resolution_sharing() {
     assert_eq!(args.len(), 2, "Expect 2 args passed to map");
     assert_eq!(
         *type_map.get(&args[0].id).unwrap(),
-        Type::Function { 
-            params: vec![
-                Type::Tuple(vec![
-                    Type::Location,
-                    Type::Location
-                ])
-            ], 
-            return_type: Box::new(Type::UserDef("Transition".to_string())) 
+        Type::Function {
+            params: vec![Type::Tuple(vec![Type::Location, Type::Location])],
+            return_type: Box::new(Type::UserDef("Transition".to_string()))
         },
         "First argument to map was wrong"
     );
     assert_eq!(
         *type_map.get(&args[1].id).unwrap(),
-        Type::Vec(Box::new(Type::Tuple(vec![
-            Type::Location,
-            Type::Location
-        ]))),
+        Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location]))),
         "Second argument to map was wrong"
     );
-
-
-    
 }

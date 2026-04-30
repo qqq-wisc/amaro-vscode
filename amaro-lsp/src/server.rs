@@ -558,25 +558,18 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         // get the text doc
         let completion_context = match params.context {
-            None => {
-                eprintln!("No completion context, can't complete");
-                return Ok(None);
-            } // only have trigger character completion
+            None => return Ok(None),
             Some(i) => i,
         };
         if !matches!(
             completion_context.trigger_kind,
             CompletionTriggerKind::TRIGGER_CHARACTER
         ) {
-            eprintln!("Completion trigger wasn't trigger character, can't complete");
             return Ok(None); // only have trigger character completion
         }
         let trigger_char = match completion_context.trigger_character {
             Some(i) => i,
-            None => {
-                eprintln!("Completion character didn't exist, can't complete");
-                return Ok(None);
-            } // only have trigger character completion
+            None => return Ok(None), // only have trigger character completion
         };
 
         let uri = params.text_document_position.text_document.uri;
@@ -595,10 +588,7 @@ impl LanguageServer for Backend {
         match trigger_char.as_str() {
             "." => self.dot_autocomplete(uri, char_before_pos).await,
             "#" => self.hash_autocomplete(char_before_pos),
-            _ => {
-                eprintln!("Trigger char was {}, skipping", trigger_char);
-                Ok(None)
-            }
+            _ => Ok(None), // trigger character not one of two, skipping
         }
 
         // // determine if . was typed
@@ -748,7 +738,6 @@ impl Backend {
         match containing_expr {
             // if we had an expression containing our goal pos...
             Ok(e) => {
-                eprintln!("\tFound expression containing the pos before the dot");
                 // now, need to find the expr right before our cursor, and get
                 // the type of that one.
                 match utils::find_finishing_subexpr(
@@ -763,12 +752,6 @@ impl Backend {
                         //         format!("\tAt dot pos {:?}, found perfectly finishing expression {}", dot_pos,perfect_end_expr.summarize()),
                         //     )
                         //     .await;
-
-                        eprintln!(
-                            "\t At dot pos {:?}, found perfectly finishing expression {}",
-                            dot_pos,
-                            perfect_end_expr.summarize()
-                        );
 
                         // get the types and stuff
                         let found_type = match cached_parse.type_map.get(&perfect_end_expr.id) {
@@ -792,10 +775,7 @@ impl Backend {
                         }
                     }
                     // expression doesn't end at anything
-                    None => {
-                        eprintln!("\tThe found expression has no perfect end {:?}", dot_pos);
-                        Ok(None)
-                    }
+                    None => Ok(None),
                 }
             }
             // if we lacked an expression containing our goal pos...

@@ -1006,7 +1006,9 @@ fn test_method_chain_with_projection() {
 
     let BlockContent::Fields(items) = &parse_output.file.blocks[0].content;
     if let Some(BlockItem::Field(field)) = items.first() {
-        assert!(matches!(field.value.kind, ExprKind::IndexAccess { .. }));
+        // this used to be IndexAccess. but that is a misnomer. it is
+        // really FieldAccess.
+        assert!(matches!(field.value.kind, ExprKind::FieldAccess { .. }));
     }
 }
 
@@ -1052,7 +1054,13 @@ fn test_complex_chaining() {
     if let Some(BlockItem::Field(field)) = items.first() {
         if let ExprKind::FunctionCall { args, .. } = &field.value.kind {
             if let ExprKind::Lambda { body, .. } = &args[0].kind {
-                assert!(matches!(body.kind, ExprKind::IndexAccess { .. }));
+                // this used to be ExprKind::IndexAccess. But that is a misnomer.
+                // this expression is really a FieldAccess.
+                assert!(
+                    matches!(body.kind, ExprKind::FieldAccess { .. }),
+                    "Expected that {} was IndexAccess",
+                    body.kind
+                );
             }
         }
     }

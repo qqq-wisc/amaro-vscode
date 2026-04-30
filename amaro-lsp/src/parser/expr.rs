@@ -657,21 +657,94 @@ fn parse_postfix_expr<'a>(
                 }
 
                 // Dynamic Indexing .(expr)
-                if let Ok((rest_final, index_expr)) = terminated(
-                    |i| parse_expr_with_context(original_input, i, ctx, diags),
-                    ws(char(')')),
-                )(rest_inner)
-                {
-                    let end = rest_final.as_ptr() as usize - original_input.as_ptr() as usize;
+                // TODO i don't think there is dynamic indexing, it is just
+                // a different notation for field access
+                // if let Ok((rest_final, index_expr)) = terminated(
+                //     |i| parse_expr_with_context(original_input, i, ctx, diags),
+                //     ws(char(')')),
+                // )(rest_inner)
+                // {
+                //     let end = rest_final.as_ptr() as usize - original_input.as_ptr() as usize;
+
+                //     base = Expr::new(
+                //         ExprKind::IndexAccess {
+                //             object: Box::new(base),
+                //             index: Box::new(index_expr),
+                //         },
+                //         calc_range(original_input, start, end - start),
+                //     );
+                //     current_input = rest_final;
+                //     continue;
+                // }
+
+                // Other notation for field access
+                if let Ok((rest, ident)) = parse_identifier(rest_inner) {
+                    // expect ()
+                    let rest = match ws(char('('))(rest) {
+                        Ok(r) => r.0,
+                        Err(e) => match e {
+                            nom::Err::Error(new_input) => {
+                                let end = new_input.input.as_ptr() as usize
+                                    - original_input.as_ptr() as usize;
+                                diags.push(Diagnostic {
+                                    range: calc_range(original_input, start, end - start),
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    source: Some("Parser".to_string()),
+                                    message: "Indexing with .(identifier()) syntax needs an opening ( inside".to_string(),
+                                    ..Default::default()
+                                });
+                                new_input.input
+                            }
+                            _ => return Err(e),
+                        },
+                    };
+                    let rest = match ws(char(')'))(rest) {
+                        Ok(r) => r.0,
+                        Err(e) => match e {
+                            nom::Err::Error(new_input) => {
+                                let end = new_input.input.as_ptr() as usize
+                                    - original_input.as_ptr() as usize;
+                                diags.push(Diagnostic {
+                                    range: calc_range(original_input, start, end - start),
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    source: Some("Parser".to_string()),
+                                    message: "Indexing with .(identifier()) syntax needs an closing ) inside".to_string(),
+                                    ..Default::default()
+                                });
+                                new_input.input
+                            }
+                            _ => return Err(e),
+                        },
+                    };
+                    let rest = match ws(char(')'))(rest) {
+                        Ok(r) => r.0,
+                        Err(e) => match e {
+                            nom::Err::Error(new_input) => {
+                                let end = new_input.input.as_ptr() as usize
+                                    - original_input.as_ptr() as usize;
+                                diags.push(Diagnostic {
+                                    range: calc_range(original_input, start, end - start),
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    source: Some("Parser".to_string()),
+                                    message: "Indexing with .(identifier()) syntax needs an closing ) outside".to_string(),
+                                    ..Default::default()
+                                });
+                                new_input.input
+                            }
+                            _ => return Err(e),
+                        },
+                    };
+
+                    let end = rest.as_ptr() as usize - original_input.as_ptr() as usize;
 
                     base = Expr::new(
-                        ExprKind::IndexAccess {
+                        ExprKind::FieldAccess {
                             object: Box::new(base),
-                            index: Box::new(index_expr),
+                            field: ident.to_string(),
                         },
                         calc_range(original_input, start, end - start),
                     );
-                    current_input = rest_final;
+                    current_input = rest;
                     continue;
                 }
 
