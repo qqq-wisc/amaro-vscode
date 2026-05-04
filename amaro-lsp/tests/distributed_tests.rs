@@ -55,19 +55,19 @@ TransitionInfo:
 
 ArchInfo:
     Arch{
-        num_qpus              : Int,
-        qpu_sizes             : Vec<Int>,
-        same_qpu              : Vec<Vec<Location>>,
-        link_cost             : Float,
-        comm_qubits           : Vec<Location>,
-        alg_qubits            : Vec<Location>,
-        n_comm_qubits         : Int,
-        bell_success_prob     : Float,
+        num_qpus : Int,
+        qpu_sizes : Vec<Int>,
+        same_qpu : Vec<Vec<Location>>,
+        link_cost : Float,
+        comm_qubits : Vec<Location>,
+        alg_qubits : Vec<Location>,
+        n_comm_qubits : Int,
+        bell_success_prob : Float,
         bell_attempt_interval : Float,
-        max_bell_rate         : Float,
-        code_distance         : Int,
-        t_cycle               : Float,
-        gate_bell_budget      : Int
+        max_bell_rate : Float,
+        code_distance : Int,
+        t_cycle : Float,
+        gate_bell_budget : Int
     }
     get_locations = Arch.alg_qubits()
 "#;

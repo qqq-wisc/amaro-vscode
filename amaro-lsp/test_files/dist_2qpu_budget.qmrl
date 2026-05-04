@@ -2,7 +2,8 @@
 // Problem: Communication Qubit Budget-Aware Scheduling
 //
 // Extends simple_2qpu.qmrl with Bell pair generation hardware parameters.
-// New constraint: MaxState enforces max_bell_pairs_per_cycle per QEC cycle.
+// New constraint: realize_gate defers remote gates when the cycle's Bell
+// pair budget is exhausted.
 //
 // Hardware model (single optical cavity, L=20):
 //   N_comm = 160, P_aa = 0.10, t_attempt = 1.0 us, R_max = 10 MHz
@@ -50,7 +51,7 @@ TransitionInfo:
     get_transitions = (map(|x| -> Transition{edge = x}, Arch.edges()))
                         .push(Transition{edge = (Location(0), Location(0))})
     apply = value_swap(Transition.edge.(0), Transition.edge.(1))
-    cost  = if (Transition.edge) == (Location(0), Location(0))
+    cost = if (Transition.edge) == (Location(0), Location(0))
                 then 0.0
                 else 1.0
 
@@ -58,27 +59,27 @@ TransitionInfo:
 ArchInfo:
     Arch{
         // Multi-QPU topology fields
-        num_qpus              : Int,
-        qpu_sizes             : Vec<Int>,
-        same_qpu              : Vec<Vec<Location>>,
-        link_cost             : Float,
-        comm_qubits           : Vec<Location>,
-        alg_qubits            : Vec<Location>,
+        num_qpus : Int,
+        qpu_sizes : Vec<Int>,
+        same_qpu : Vec<Vec<Location>>,
+        link_cost : Float,
+        comm_qubits : Vec<Location>,
+        alg_qubits : Vec<Location>,
 
         // Bell pair generation hardware parameters
-        n_comm_qubits         : Int,
-        bell_success_prob     : Float,
+        n_comm_qubits : Int,
+        bell_success_prob : Float,
         bell_attempt_interval : Float,
-        max_bell_rate         : Float,
-        code_distance         : Int,
+        max_bell_rate : Float,
+        code_distance : Int,
 
         // Researcher-chosen QEC cycle time (must exceed syndrome_demand / R_Bell).
         // budget = floor(R_Bell × t_cycle) - syndrome_demand
-        t_cycle               : Float,
+        t_cycle : Float,
 
         // Precomputed from the hardware fields above for now. QMRL does not yet
         // have floor/min/< operators, so the example keeps this as architecture data.
-        gate_bell_budget      : Int
+        gate_bell_budget : Int
     }
     get_locations = Arch.alg_qubits()
 
