@@ -51,9 +51,7 @@ TransitionInfo:
     get_transitions = (map(|x| -> Transition{edge = x}, Arch.edges()))
                         .push(Transition{edge = (Location(0), Location(0))})
     apply = value_swap(Transition.edge.(0), Transition.edge.(1))
-    cost = if (Transition.edge) == (Location(0), Location(0))
-                then 0.0
-                else 1.0
+    cost = 0.0
 
 
 ArchInfo:
@@ -85,11 +83,5 @@ ArchInfo:
 
 
 StateInfo:
-    // Cost = local swap count + e-bit count (link_cost per remote gate)
-    // Bell pair budget enforcement is in realize_gate, not here.
-    cost = fold(0.0,
-                |x, acc| -> acc + x,
-                map(|x| -> if x.implementation.(remote())
-                               then Arch.link_cost
-                               else 0.0,
-                    State.implemented_gates()))
+    // Minimize steps subject to the Bell-pair budget enforced in realize_gate.
+    cost = 1.0
