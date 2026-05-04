@@ -5,7 +5,7 @@
 ///   2. No spurious errors — zero errors on valid distributed QMRL
 ///   3. Type annotations — Bool fields, (Location,Location) tuples, Vec<Int>
 ///   4. ArchT field types — all multi-QPU and Bell pair scalar/vec fields
-///   5. ArchT distributed fields — same_qpu membership and gate_bell_budget
+///   5. ArchT distributed fields — qpu_ids membership and gate_bell_budget
 ///   6. Gate.implementation — infers UserDef("GateRealization"), not Unknown
 ///   7. State.implemented_gates() — infers Vec<UserDef("GateRealization")>, not Unknown
 ///   8. Struct/Struct type compatibility — two Option<GateRealization> branches are compatible
@@ -57,7 +57,7 @@ ArchInfo:
     Arch{
         num_qpus : Int,
         qpu_sizes : Vec<Int>,
-        same_qpu : Vec<Vec<Location>>,
+        qpu_ids : Vec<Int>,
         link_cost : Float,
         comm_qubits : Vec<Location>,
         alg_qubits : Vec<Location>,
@@ -274,15 +274,15 @@ fn test_arch_qpu_sizes_is_vec_int() {
 // ─── 5. ArchT distributed fields ─────────────────────────────────────────────
 
 #[test]
-fn test_same_qpu_membership_usable_as_condition() {
+fn test_qpu_ids_membership_usable_as_condition() {
     let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if (Arch.same_qpu[State.map[Gate.qubits[0]]]) == Arch.same_qpu[State.map[Gate.qubits[1]]] then 1.0 else 0.0"
+        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if (Arch.qpu_ids[State.map[Gate.qubits[0]]]) == Arch.qpu_ids[State.map[Gate.qubits[1]]] then 1.0 else 0.0"
     );
     let file = parse_file(&input).unwrap();
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
-        "Arch.same_qpu membership comparison produced errors: {:?}",
+        "Arch.qpu_ids membership comparison produced errors: {:?}",
         errors
     );
 }
@@ -438,7 +438,7 @@ RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location, remote : Bool}
     realize_gate =
-        if (Arch.same_qpu[State.map[Gate.qubits[0]]]) == Arch.same_qpu[State.map[Gate.qubits[1]]]
+        if (Arch.qpu_ids[State.map[Gate.qubits[0]]]) == Arch.qpu_ids[State.map[Gate.qubits[1]]]
             then
                 if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
                     then Some(GateRealization{u = State.map[Gate.qubits[0]], v = State.map[Gate.qubits[1]], remote = false})
@@ -453,7 +453,7 @@ TransitionInfo:
     cost = 1.0
 
 ArchInfo:
-    Arch{ num_qpus : Int, qpu_sizes : Vec<Int>, same_qpu : Vec<Vec<Location>>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location> }
+    Arch{ num_qpus : Int, qpu_sizes : Vec<Int>, qpu_ids : Vec<Int>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location> }
     get_locations = Arch.alg_qubits()
 "#;
     let file = parse_file(input).unwrap();

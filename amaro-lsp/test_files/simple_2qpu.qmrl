@@ -7,13 +7,13 @@
 //   comm_qubits: one per QPU, reserved for inter-QPU Bell pair generation
 //   alg_qubits: all locations minus comm qubits (available for data)
 //
-// same_qpu[i] contains the locations that share a QPU with Location(i).
+// qpu_ids[i] contains the QPU id for Location(i).
 
 RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location, remote : Bool}
     realize_gate =
-        if (Arch.same_qpu[State.map[Gate.qubits[0]]]) == Arch.same_qpu[State.map[Gate.qubits[1]]]
+        if (Arch.qpu_ids[State.map[Gate.qubits[0]]]) == Arch.qpu_ids[State.map[Gate.qubits[1]]]
             then
                 // Local gate: both qubits on same QPU, require a direct edge
                 if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
@@ -47,7 +47,7 @@ ArchInfo:
     Arch{
         num_qpus : Int,
         qpu_sizes : Vec<Int>,
-        same_qpu : Vec<Vec<Location>>,
+        qpu_ids : Vec<Int>,
         link_cost : Float,
         comm_qubits : Vec<Location>,
         alg_qubits : Vec<Location>

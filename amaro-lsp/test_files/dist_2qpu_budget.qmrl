@@ -14,14 +14,14 @@
 //     No inter-module gates can be scheduled in a cycle with T=40 us
 //     Compiler must increase T_cycle to accommodate remote gates
 //
-// same_qpu and gate_bell_budget are ordinary architecture fields. This keeps
+// qpu_ids and gate_bell_budget are ordinary architecture fields. This keeps
 // distributed policy in QMRL instead of hard-coding it in the emitter.
 
 RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location, remote : Bool}
     realize_gate =
-        if (Arch.same_qpu[State.map[Gate.qubits[0]]]) == Arch.same_qpu[State.map[Gate.qubits[1]]]
+        if (Arch.qpu_ids[State.map[Gate.qubits[0]]]) == Arch.qpu_ids[State.map[Gate.qubits[1]]]
             then
                 // Local gate: standard connectivity check, no Bell pair cost
                 if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
@@ -61,7 +61,7 @@ ArchInfo:
         // Multi-QPU topology fields
         num_qpus : Int,
         qpu_sizes : Vec<Int>,
-        same_qpu : Vec<Vec<Location>>,
+        qpu_ids : Vec<Int>,
         link_cost : Float,
         comm_qubits : Vec<Location>,
         alg_qubits : Vec<Location>,
