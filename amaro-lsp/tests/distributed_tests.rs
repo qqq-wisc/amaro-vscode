@@ -5,17 +5,18 @@
 ///   2. No spurious errors — zero errors on valid distributed QMRL
 ///   3. Type annotations — Bool fields, (Location,Location) tuples, Vec<Int>
 ///   4. ArchT field types — all multi-QPU and Bell pair scalar/vec fields
-///   5. ArchT method types — same_qpu as Bool condition, Bell pair methods callable
+///   5. ArchT distributed fields — same_qpu membership and gate_bell_budget
 ///   6. Gate.implementation — infers UserDef("GateRealization"), not Unknown
 ///   7. State.implemented_gates() — infers Vec<UserDef("GateRealization")>, not Unknown
 ///   8. Struct/Struct type compatibility — two Option<GateRealization> branches are compatible
 ///   9. IndexAccess on Unknown — no spurious "Undefined variable" or branch type errors
 ///  10. Regression — nisq.qmrl stays clean after all changes
-
 use amaro_lsp::ast::*;
 use amaro_lsp::parser::core::parse_file;
 use amaro_lsp::parser::symbols::{SymbolTable, Type, UserDefTable};
-use amaro_lsp::parser::{check_semantics, infer_expr_type, InferenceData};
+use amaro_lsp::parser::{
+    GenericTable, InferenceData, StringLabels, TypeMap, check_semantics, infer_expr_type,
+};
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{DiagnosticSeverity, Position, Range};
 
@@ -56,6 +57,7 @@ ArchInfo:
     Arch{
         num_qpus              : Int,
         qpu_sizes             : Vec<Int>,
+        same_qpu              : Vec<Vec<Location>>,
         link_cost             : Float,
         comm_qubits           : Vec<Location>,
         alg_qubits            : Vec<Location>,
@@ -63,7 +65,9 @@ ArchInfo:
         bell_success_prob     : Float,
         bell_attempt_interval : Float,
         max_bell_rate         : Float,
-        code_distance         : Int
+        code_distance         : Int,
+        t_cycle               : Float,
+        gate_bell_budget      : Int
     }
     get_locations = Arch.alg_qubits()
 "#;
@@ -122,8 +126,7 @@ fn only_errors(file: &AmaroFile) -> Vec<String> {
 
 #[test]
 fn test_simple_2qpu_parses() {
-    let file = parse_file(SIMPLE_2QPU)
-        .expect("simple_2qpu.qmrl should parse without error");
+    let file = parse_file(SIMPLE_2QPU).expect("simple_2qpu.qmrl should parse without error");
     // RouteInfo, TransitionInfo, ArchInfo, StateInfo
     assert!(
         file.blocks.len() >= 4,
@@ -134,8 +137,8 @@ fn test_simple_2qpu_parses() {
 
 #[test]
 fn test_dist_2qpu_budget_parses() {
-    let file = parse_file(DIST_2QPU_BUDGET)
-        .expect("dist_2qpu_budget.qmrl should parse without error");
+    let file =
+        parse_file(DIST_2QPU_BUDGET).expect("dist_2qpu_budget.qmrl should parse without error");
     assert!(
         file.blocks.len() >= 4,
         "Expected at least 4 blocks, got {}",
@@ -152,7 +155,11 @@ fn test_simple_2qpu_no_errors() {
     assert!(
         errors.is_empty(),
         "simple_2qpu.qmrl produced unexpected error(s):\n{}",
-        errors.iter().map(|m| format!("  - {m}")).collect::<Vec<_>>().join("\n")
+        errors
+            .iter()
+            .map(|m| format!("  - {m}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -163,7 +170,11 @@ fn test_dist_2qpu_budget_no_errors() {
     assert!(
         errors.is_empty(),
         "dist_2qpu_budget.qmrl produced unexpected error(s):\n{}",
-        errors.iter().map(|m| format!("  - {m}")).collect::<Vec<_>>().join("\n")
+        errors
+            .iter()
+            .map(|m| format!("  - {m}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -171,9 +182,7 @@ fn test_dist_2qpu_budget_no_errors() {
 
 #[test]
 fn test_bool_field_in_gate_realization_no_error() {
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0"
-    );
+    let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
     let file = parse_file(&input).unwrap();
     let errors = only_errors(&file);
     assert!(
@@ -227,9 +236,7 @@ fn test_arch_num_qpus_field_is_int_type() {
 
 #[test]
 fn test_arch_link_cost_field_is_float_type() {
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = Arch.link_cost"
-    );
+    let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = Arch.link_cost");
     let file = parse_file(&input).unwrap();
     let errors = only_errors(&file);
     assert!(
@@ -240,58 +247,56 @@ fn test_arch_link_cost_field_is_float_type() {
 }
 
 #[test]
+fn test_arch_t_cycle_field_is_float_type() {
+    let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = Arch.t_cycle");
+    let file = parse_file(&input).unwrap();
+    let errors = only_errors(&file);
+    assert!(
+        errors.is_empty(),
+        "Arch.t_cycle used as Float cost produced errors: {:?}",
+        errors
+    );
+}
+
+#[test]
 fn test_arch_qpu_sizes_is_vec_int() {
     // Accessing Arch.qpu_sizes should not error
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0"
-    );
+    let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
     let file = parse_file(&input).unwrap();
     let errors = only_errors(&file);
-    assert!(errors.is_empty(), "Arch with Vec<Int> qpu_sizes errored: {:?}", errors);
+    assert!(
+        errors.is_empty(),
+        "Arch with Vec<Int> qpu_sizes errored: {:?}",
+        errors
+    );
 }
 
-// ─── 5. ArchT method types ───────────────────────────────────────────────────
+// ─── 5. ArchT distributed fields ─────────────────────────────────────────────
 
 #[test]
-fn test_same_qpu_returns_bool_usable_as_condition() {
+fn test_same_qpu_membership_usable_as_condition() {
     let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if Arch.same_qpu(State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]) then 1.0 else 0.0"
+        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if (Arch.same_qpu[State.map[Gate.qubits[0]]]) == Arch.same_qpu[State.map[Gate.qubits[1]]] then 1.0 else 0.0"
     );
     let file = parse_file(&input).unwrap();
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
-        "Arch.same_qpu used as Bool condition produced errors: {:?}",
+        "Arch.same_qpu membership comparison produced errors: {:?}",
         errors
     );
 }
 
 #[test]
-fn test_bell_pair_rate_callable_no_error() {
-    // bell_pair_rate() is a 0-arg method returning Float
+fn test_gate_bell_budget_field_no_error() {
     let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = Arch.bell_pair_rate()"
+        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if Arch.gate_bell_budget == 40 then 1.0 else 0.0"
     );
     let file = parse_file(&input).unwrap();
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
-        "Arch.bell_pair_rate() produced errors: {:?}",
-        errors
-    );
-}
-
-#[test]
-fn test_is_saturated_callable_no_error() {
-    // is_saturated() is a 0-arg method returning Bool, usable as condition
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if Arch.is_saturated() then 1.0 else 0.0"
-    );
-    let file = parse_file(&input).unwrap();
-    let errors = only_errors(&file);
-    assert!(
-        errors.is_empty(),
-        "Arch.is_saturated() as Bool condition produced errors: {:?}",
+        "Arch.gate_bell_budget field produced errors: {:?}",
         errors
     );
 }
@@ -300,9 +305,7 @@ fn test_is_saturated_callable_no_error() {
 
 #[test]
 fn test_impl_struct_name_extracted_from_route_info() {
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0"
-    );
+    let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
     let file = parse_file(&input).unwrap();
     let name = extract_impl_struct_name(&file);
     assert_eq!(
@@ -316,24 +319,32 @@ fn test_impl_struct_name_extracted_from_route_info() {
 #[test]
 fn test_gate_realization_fields_in_user_def_table() {
     // UserDefTable built from a file with remote:Bool should expose all three fields
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0"
-    );
+    let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
     let file = parse_file(&input).unwrap();
     let udt = UserDefTable::new(&file);
     let fields = udt
         .get_fields("GateRealization")
         .expect("GateRealization not in UserDefTable");
-    assert_eq!(fields.get("u"), Some(&Type::Location), "field u should be Location");
-    assert_eq!(fields.get("v"), Some(&Type::Location), "field v should be Location");
-    assert_eq!(fields.get("remote"), Some(&Type::Bool), "field remote should be Bool");
+    assert_eq!(
+        fields.get("u"),
+        Some(&Type::Location),
+        "field u should be Location"
+    );
+    assert_eq!(
+        fields.get("v"),
+        Some(&Type::Location),
+        "field v should be Location"
+    );
+    assert_eq!(
+        fields.get("remote"),
+        Some(&Type::Bool),
+        "field remote should be Bool"
+    );
 }
 
 #[test]
 fn test_gate_implementation_infers_user_def_not_unknown() {
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0"
-    );
+    let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
     let file = parse_file(&input).unwrap();
     let udt = UserDefTable::new(&file);
     let impl_struct_name = extract_impl_struct_name(&file);
@@ -345,7 +356,10 @@ fn test_gate_implementation_infers_user_def_not_unknown() {
 
     let mut sym = SymbolTable::new();
     let mut diags = Vec::new();
-    let mut type_map = HashMap::new();
+    let mut type_map = TypeMap::new();
+    let mut generic_table = GenericTable::new();
+    let mut string_labels = StringLabels::new();
+    let arch_fields = HashMap::new();
     let t = infer_expr_type(
         &gate_impl_expr,
         &mut InferenceData {
@@ -353,7 +367,10 @@ fn test_gate_implementation_infers_user_def_not_unknown() {
             diagnostics: &mut diags,
             type_map: &mut type_map,
             user_def_table: &udt,
+            generic_table: &mut generic_table,
+            string_labels: &mut string_labels,
             impl_struct_name,
+            arch_fields: &arch_fields,
         },
     );
     assert_eq!(
@@ -368,9 +385,7 @@ fn test_gate_implementation_infers_user_def_not_unknown() {
 
 #[test]
 fn test_implemented_gates_infers_vec_user_def_not_unknown() {
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0"
-    );
+    let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
     let file = parse_file(&input).unwrap();
     let udt = UserDefTable::new(&file);
     let impl_struct_name = extract_impl_struct_name(&file);
@@ -382,7 +397,10 @@ fn test_implemented_gates_infers_vec_user_def_not_unknown() {
 
     let mut sym = SymbolTable::new();
     let mut diags = Vec::new();
-    let mut type_map = HashMap::new();
+    let mut type_map = TypeMap::new();
+    let mut generic_table = GenericTable::new();
+    let mut string_labels = StringLabels::new();
+    let arch_fields = HashMap::new();
     let t = infer_expr_type(
         &state_impl_gates_expr,
         &mut InferenceData {
@@ -390,7 +408,10 @@ fn test_implemented_gates_infers_vec_user_def_not_unknown() {
             diagnostics: &mut diags,
             type_map: &mut type_map,
             user_def_table: &udt,
+            generic_table: &mut generic_table,
+            string_labels: &mut string_labels,
             impl_struct_name,
+            arch_fields: &arch_fields,
         },
     );
     assert_eq!(
@@ -417,7 +438,7 @@ RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location, remote : Bool}
     realize_gate =
-        if Arch.same_qpu(State.map[Gate.qubits[0]], State.map[Gate.qubits[1]])
+        if (Arch.same_qpu[State.map[Gate.qubits[0]]]) == Arch.same_qpu[State.map[Gate.qubits[1]]]
             then
                 if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
                     then Some(GateRealization{u = State.map[Gate.qubits[0]], v = State.map[Gate.qubits[1]], remote = false})
@@ -432,7 +453,7 @@ TransitionInfo:
     cost = 1.0
 
 ArchInfo:
-    Arch{ num_qpus : Int, qpu_sizes : Vec<Int>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location> }
+    Arch{ num_qpus : Int, qpu_sizes : Vec<Int>, same_qpu : Vec<Vec<Location>>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location> }
     get_locations = Arch.alg_qubits()
 "#;
     let file = parse_file(input).unwrap();
@@ -456,9 +477,7 @@ fn test_dynamic_field_access_on_unknown_produces_no_false_positives() {
     // Must not produce:
     //   (a) "Undefined variable 'remote'" — the index is inside .(expr) syntax
     //   (b) "compatible types" error — then/else are both Float
-    let input = format!(
-        "{DISTRIBUTED_PREAMBLE}\n{STATEINFO_WITH_IMPLEMENTATION_ACCESS}"
-    );
+    let input = format!("{DISTRIBUTED_PREAMBLE}\n{STATEINFO_WITH_IMPLEMENTATION_ACCESS}");
     let file = parse_file(&input).unwrap();
     let diags = check_semantics(&file);
 
@@ -492,7 +511,52 @@ fn test_nisq_no_errors_after_distributed_changes() {
     assert!(
         errors.is_empty(),
         "nisq.qmrl regression — unexpected error(s):\n{}",
-        errors.iter().map(|m| format!("  - {m}")).collect::<Vec<_>>().join("\n")
+        errors
+            .iter()
+            .map(|m| format!("  - {m}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// Verify that `x` in `map(|x| -> ..., State.implemented_gates())` gets type
+/// UserDef("GateRealization") so `x.implementation.(remote())` is fully typed.
+#[test]
+fn test_map_lambda_param_inferred_from_container() {
+    let src = format!(
+        "{}\nStateInfo:\n    cost = fold(0.0, |x, acc| -> acc, map(|x| -> x, State.implemented_gates()))\n",
+        DISTRIBUTED_PREAMBLE
+    );
+    let file = parse_file(&src).unwrap();
+    let errors = only_errors(&file);
+    assert!(
+        errors.is_empty(),
+        "map lambda param inference introduced errors:\n{}",
+        errors
+            .iter()
+            .map(|m| format!("  - {m}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// Verify `x.implementation.(remote())` inside map produces no errors
+/// when x is properly bound to GateRealization.
+#[test]
+fn test_map_lambda_field_access_no_error_with_inferred_param() {
+    let src = format!(
+        "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = fold(0.0, |x, acc| -> acc + x, map(|x| -> if x.implementation.(remote()) then 1.0 else 0.0, State.implemented_gates()))\n"
+    );
+    let file = parse_file(&src).unwrap();
+    let errors = only_errors(&file);
+    assert!(
+        errors.is_empty(),
+        "map lambda with inferred GateRealization param produced errors:\n{}",
+        errors
+            .iter()
+            .map(|m| format!("  - {m}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 

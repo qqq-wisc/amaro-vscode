@@ -200,6 +200,7 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
     let mut type_map = TypeMap::new();
     let mut string_labels = StringLabels::new();
     let impl_struct_name = extract_impl_struct_name(file);
+    let arch_fields = extract_arch_fields(file);
 
     // Block Level Validation
     for block in &file.blocks {
@@ -292,6 +293,7 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
                     generic_table: &mut generic_table,
                     string_labels: &mut string_labels,
                     impl_struct_name: impl_struct_name.clone(),
+                    arch_fields: &arch_fields,
                 };
 
                 let mut field_type = register_field(&field.value, &mut inf_data);
@@ -424,6 +426,43 @@ fn extract_impl_struct_name(file: &AmaroFile) -> Option<String> {
                 _ => None,
             })
         })
+}
+
+pub(crate) fn extract_arch_fields(file: &AmaroFile) -> HashMap<String, Type> {
+    file.blocks
+        .iter()
+        .find(|b| b.kind.eq_ignore_ascii_case("ArchInfo"))
+        .map(|b| {
+            let BlockContent::Fields(items) = &b.content;
+            items
+                .iter()
+                .find_map(|item| match item {
+                    BlockItem::StructDef(s) => Some(
+                        s.fields
+                            .iter()
+                            .map(|field| {
+                                (
+                                    field.name.clone(),
+                                    Type::from_type_annotation(&field.type_annotation),
+                                )
+                            })
+                            .collect(),
+                    ),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+}
+
+fn arch_field_access_type(t: &Type) -> Type {
+    match t {
+        Type::Vec(_) => Type::Function {
+            params: vec![],
+            return_type: Box::new(t.clone()),
+        },
+        _ => t.clone(),
+    }
 }
 
 // Validates that gate identifiers are recognized gate types (CX, T, Pauli, PauliMeasurement).
@@ -953,6 +992,7 @@ pub struct InferenceData<'a> {
     pub generic_table: &'a mut GenericTable,
     pub string_labels: &'a mut StringLabels,
     pub impl_struct_name: Option<String>,
+    pub arch_fields: &'a HashMap<String, Type>,
 }
 
 /// Precondition: Expr and all subexpressions have a type (even if unknown) in
@@ -1547,6 +1587,16 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                 };
 
                 let type_from_context = match (&obj_type, field.as_str()) {
+                    (Type::ArchT, _) => inference_data
+                        .arch_fields
+                        .get(field)
+                        .or_else(|| {
+                            inference_data
+                                .user_def_table
+                                .get_fields("Arch")
+                                .and_then(|fields| fields.get(field))
+                        })
+                        .map(arch_field_access_type),
                     (Type::Gate, "implementation") => inference_data
                         .impl_struct_name
                         .as_ref()
@@ -2303,6 +2353,7 @@ mod tests {
     #[test]
     fn test_infer_bin_op_math() {
         let mut diags = Vec::new();
+        let empty_arch_fields = HashMap::new();
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
@@ -2311,6 +2362,7 @@ mod tests {
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
             impl_struct_name: None,
+            arch_fields: &empty_arch_fields,
         };
 
         let def_range = Range {
@@ -2461,6 +2513,7 @@ mod tests {
     #[test]
     fn test_infer_bin_op_logic() {
         let mut diags = Vec::new();
+        let empty_arch_fields = HashMap::new();
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
@@ -2469,6 +2522,7 @@ mod tests {
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
             impl_struct_name: None,
+            arch_fields: &empty_arch_fields,
         };
 
         let def_range = Range {
@@ -2539,6 +2593,7 @@ mod tests {
     #[test]
     fn test_infer_unary() {
         let mut diags = Vec::new();
+        let empty_arch_fields = HashMap::new();
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
@@ -2547,6 +2602,7 @@ mod tests {
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
             impl_struct_name: None,
+            arch_fields: &empty_arch_fields,
         };
 
         let def_range = Range {

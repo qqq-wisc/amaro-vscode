@@ -13,14 +13,14 @@
 //     No inter-module gates can be scheduled in a cycle with T=40 us
 //     Compiler must increase T_cycle to accommodate remote gates
 //
-// Note: All multi-QPU built-ins (qpu_id, same_qpu, comm_qubit_for) must be
-// present in ArchInfo. This file adds Bell pair budget fields on top.
+// same_qpu and gate_bell_budget are ordinary architecture fields. This keeps
+// distributed policy in QMRL instead of hard-coding it in the emitter.
 
 RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location, remote : Bool}
     realize_gate =
-        if Arch.same_qpu(State.map[Gate.qubits[0]], State.map[Gate.qubits[1]])
+        if (Arch.same_qpu[State.map[Gate.qubits[0]]]) == Arch.same_qpu[State.map[Gate.qubits[1]]]
             then
                 // Local gate: standard connectivity check, no Bell pair cost
                 if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
@@ -31,13 +31,18 @@ RouteInfo:
                          })
                     else None
             else
-                // Remote gate: TeleGate via Bell pair.
-                // Bell pair budget enforcement lives in the MaxState layer.
-                Some(GateRealization{
-                    u = State.map[Gate.qubits[0]],
-                    v = State.map[Gate.qubits[1]],
-                    remote = true
-                })
+                // Remote gate: TeleGate via Bell pair. Defer when this cycle
+                // has already consumed the available remote-gate Bell budget.
+                if (fold(0,
+                        |x, acc| -> acc + x,
+                        map(|x| -> if x.implementation.(remote()) then 1 else 0,
+                            State.implemented_gates()))) == Arch.gate_bell_budget
+                    then None
+                    else Some(GateRealization{
+                        u = State.map[Gate.qubits[0]],
+                        v = State.map[Gate.qubits[1]],
+                        remote = true
+                    })
 
 
 TransitionInfo:
@@ -55,6 +60,7 @@ ArchInfo:
         // Multi-QPU topology fields
         num_qpus              : Int,
         qpu_sizes             : Vec<Int>,
+        same_qpu              : Vec<Vec<Location>>,
         link_cost             : Float,
         comm_qubits           : Vec<Location>,
         alg_qubits            : Vec<Location>,
@@ -64,7 +70,15 @@ ArchInfo:
         bell_success_prob     : Float,
         bell_attempt_interval : Float,
         max_bell_rate         : Float,
-        code_distance         : Int
+        code_distance         : Int,
+
+        // Researcher-chosen QEC cycle time (must exceed syndrome_demand / R_Bell).
+        // budget = floor(R_Bell × t_cycle) - syndrome_demand
+        t_cycle               : Float,
+
+        // Precomputed from the hardware fields above for now. QMRL does not yet
+        // have floor/min/< operators, so the example keeps this as architecture data.
+        gate_bell_budget      : Int
     }
     get_locations = Arch.alg_qubits()
 
