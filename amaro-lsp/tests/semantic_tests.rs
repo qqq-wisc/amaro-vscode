@@ -1755,6 +1755,7 @@ fn test_if_then_else_information_sharing() {
     let mut sym_table = SymbolTable::new();
     let mut diags = Vec::new();
     let mut generic_table = GenericTable::new();
+    let arch_fields = std::collections::HashMap::new();
 
     let mut inf_data = InferenceData {
         sym_table: &mut sym_table,
@@ -1763,6 +1764,8 @@ fn test_if_then_else_information_sharing() {
         user_def_table: &user_def_table,
         generic_table: &mut generic_table,
         string_labels: &mut string_labels,
+        impl_struct_name: None,
+        arch_fields: &arch_fields,
     };
 
     assert_eq!(
@@ -1813,6 +1816,7 @@ fn test_map_generic_resolution_sharing() {
     let mut sym_table = SymbolTable::new();
     let mut diags = Vec::new();
     let mut generic_table = GenericTable::new();
+    let arch_fields = std::collections::HashMap::new();
 
     let mut inf_data = InferenceData {
         sym_table: &mut sym_table,
@@ -1821,6 +1825,8 @@ fn test_map_generic_resolution_sharing() {
         user_def_table: &user_def_table,
         generic_table: &mut generic_table,
         string_labels: &mut string_labels,
+        impl_struct_name: None,
+        arch_fields: &arch_fields,
     };
 
     assert_eq!(

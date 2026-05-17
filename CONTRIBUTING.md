@@ -1,6 +1,6 @@
 # Contributing to Amaro VS Code Extension
 
-Thank you for your interest in contributing to the Amaro language tools! This document provides guidance on building, testing, and debugging the extension and the language server.
+This document covers the build, test, and debugging workflow for the VS Code extension and Rust language server.
 
 ## Architecture Overview
 
@@ -28,12 +28,15 @@ The LSP follows a three-stage pipeline:
 - Checks required fields (`routed_gates`, `realize_gate`, etc.)
 - Performs type inference on all expressions
 - Emits diagnostics (errors and warnings)
-- 
 
 **Stage 3: Symbol Table (`parser/symbols.rs`)**
 - Tracks variable bindings and their types
 - Manages scopes (let-bindings, lambda parameters)
-- Handles some type compatibility checks
+
+Static language metadata lives under `amaro-lsp/src/info/`:
+- `builtins.rs` for built-in functions, methods, and raw completions
+- `fields.rs` for expected block fields and their types
+- `blocks.rs` for recognized block names and aliases
 
 ## Development Setup
 
@@ -116,8 +119,8 @@ TransitionInfo:
     apply = []
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let file = parse_file(input).unwrap().file;
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags.iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
         .collect();
@@ -129,16 +132,17 @@ TransitionInfo:
 
 ### Adding a New Built-in Function
 
-1. **Add the function signature to `symbols.rs`:**
+1. **Add the function signature to `info/builtins.rs`:**
    ```rust
-   fn register_builtin_functions(scope: &mut HashMap<String, Type>) {
-       // ... existing functions
-       
-       scope.insert("my_new_function".to_string(), Type::Function {
+   BuiltIn {
+       parent_type: None,
+       identifier: "my_new_function".to_string(),
+       typ: Type::Function {
            params: vec![Type::ArchT, Type::Int],
            return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-       });
-   }
+       },
+       details: "Describe what the function does.".to_string(),
+   },
    ```
 
 2. **Add a test in `tests/semantic_tests.rs`:**
@@ -155,8 +159,8 @@ TransitionInfo:
        apply = []
        cost = 0.0
    "#;
-       let file = parse_file(input).unwrap();
-       let diags = check_semantics(&file);
+       let file = parse_file(input).unwrap().file;
+       let diags = check_semantics(&file).diagnostics;
        assert!(diags.is_empty());
    }
    ```
@@ -281,7 +285,6 @@ amaro-vscode/
 **`parser/symbols.rs`**
 - Defines the type system (`Type` enum)
 - Manages scoped symbol table
-- Registers all built-in functions
 - Provides type lookup
 
 **`parser/semantics.rs`**
@@ -367,5 +370,3 @@ cargo clippy --fix
 - **Questions:** Open a GitHub Discussion
 - **Bugs:** Open a GitHub Issue with a minimal `.qmrl` reproduction
 - **Feature Requests:** Open an Issue describing the use case
-
-Thank you for contributing!

@@ -351,6 +351,15 @@ fn init_builtins() -> Vec<(Option<Type>, Vec<BuiltIn>)> {
             typ: Type::Function { params: vec![Type::Unknown], return_type: Box::new(Type::Unknown) },
             details: "".to_string() // TODO details
         },
+        BuiltIn {
+            parent_type: None,
+            identifier: "range".to_string(),
+            typ: Type::Function {
+                params: vec![Type::Int],
+                return_type: Box::new(Type::Vec(Box::new(Type::Int)))
+            },
+            details: "Integer range.".to_string()
+        },
 
         // generic map
         BuiltIn {

@@ -14,6 +14,7 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 use super::expr::parse_expr;
 use super::utils::calc_range;
 use crate::ast::*;
+use crate::info::blocks::BlockName;
 
 // Whitespaces and Comments
 pub fn whitespace_handler(input: &str) -> IResult<&str, &str> {
@@ -424,9 +425,10 @@ fn extract_block_items(
 fn is_new_block_start(line: &str) -> bool {
     let trimmed = line.trim_start();
     match parse_identifier(trimmed) {
-        Ok((rest, _)) => {
+        Ok((rest, name)) => {
             let next_char = rest.trim_start().chars().next();
-            matches!(next_char, Some('[') | Some(':'))
+            matches!(next_char, Some('['))
+                || (matches!(next_char, Some(':')) && BlockName::from_string(name).is_some())
         }
         Err(_) => false,
     }

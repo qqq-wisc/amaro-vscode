@@ -101,7 +101,7 @@ fn init_fields() -> Vec<FieldInfo> {
             info: "".to_string(), // TODO details
             typ: Type::Function {
                 params: vec![Type::ArchT, Type::StateT, Type::Gate],
-                return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
+                return_type: Box::new(Type::Option(Box::new(Type::UserDef(
                     "GateRealization".to_string(),
                 )))),
             },
@@ -195,7 +195,7 @@ mod tests {
                 lookup.typ,
                 Type::Function {
                     params: vec![Type::ArchT, Type::StateT, Type::Gate],
-                    return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
+                    return_type: Box::new(Type::Option(Box::new(Type::UserDef(
                         "GateRealization".to_string(),
                     )))),
                 }

@@ -4,23 +4,26 @@ All notable changes to the "amaro-vscode" extension will be documented in this f
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
-## [1.0.4] - 2026-04-27
+## [1.1.0] - 2026-05-16
 
 ### Added
-- **Hover on variables:** Users can now hover over varaibles in let expressions and lambda expressions to see their types.
+- **Hover on variables:** Hover over variables in let expressions and lambda expressions to see inferred types.
 - **Type inlay hints:** With inlay hints enabled, variables in let expressions, variables in lambdas, and field names will show their types to the user.
-- **Generic type inference:** Added support for generic types along with system to infer these types, resulting in significantly fewer `Unknown` types being displayed to the user.
-- **Built-ins, blocks, and fields files:** Added files to store information about built-in functions, built-in types, blocks, and fields. This permits future developers to be able to quickly modify these files if non-syntax elements of the language change.
-- **Autocomplete for built-ins without preceeding type:** Typing a '#' will show to the user all the built-in types and functions of the language, such as `map` and `fold`.
-- **Field expected types:** All fields now have expected types, which are compared to the actual types inferred. If there is a mismatch, errors are emitted. The field types are also used to help nail down generics in the inferred expression.
+- **Generic type inference:** Added generic-aware inference for built-ins such as `map`, `fold`, and vector methods, reducing unnecessary `Unknown` types.
+- **Built-ins, blocks, and fields files:** Moved built-in functions, block metadata, and field signatures into `amaro-lsp/src/info/`.
+- **Autocomplete for raw built-ins:** Typing `#` shows built-in names such as `map` and `fold`.
+- **Field expected types:** Field signatures are checked against inferred expression types and also help resolve generics.
+- **Distributed QMRL fixtures:** Added `simple_2qpu.qmrl` and `dist_2qpu_budget.qmrl` test files for multi-QPU routing and communication-budget scheduling.
+- **Architecture field inference:** `ArchInfo` fields declared in QMRL are available to semantic checking, including flat `qpu_ids` and `gate_bell_budget`.
 
 ### Fixed
-- **Autocomplete limitations reduced:** Typing a '.' after a nested expression would oftentimes not register the expressions at all. With changes to the parser to work through errors, autocomplete now produces results in more situations.
+- **Autocomplete after nested expressions:** Dot completion now works in more nested-expression cases.
+- **Distributed type inference:** `Gate.implementation` and `State.implemented_gates()` now resolve to the QMRL-defined `GateRealization` type.
 
 ### Changed
-- **Parser emits errors:** Previously, when the parser failed, it would quietly skip the line, unbeknownst to the user. Now, the parser provides diagnostic messages to indicate to the user that a line had errors.
-- **Expression inference:** While previously `infer_expr_type` was sufficient for inferring a field, now each field should be inferred using the `register_field` function, as this permits taking into account and applying generic types.
-- **Non-syntax information extracted:** All information about specific blocks, fields, and built-ins have been moved and segregated to their own files, with other files reading from these. This allows the non-syntax information to be modified in a single location.
+- **Parser diagnostics:** Parser failures now produce diagnostics instead of silently skipping bad lines.
+- **Expression inference:** Field inference now goes through `register_field` so generic constraints can be applied before diagnostics are finalized.
+- **Non-syntax information extracted:** Block, field, and built-in metadata now live in one place under `info/`.
 
 ## [1.0.3] - 2026-03-04
 

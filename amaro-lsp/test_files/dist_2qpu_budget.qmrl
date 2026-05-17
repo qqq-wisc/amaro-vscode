@@ -1,0 +1,87 @@
+// Two-QPU Distributed Routing with Bell Pair Budget Constraint
+// Problem: Communication Qubit Budget-Aware Scheduling
+//
+// Extends simple_2qpu.qmrl with Bell pair generation hardware parameters.
+// New constraint: realize_gate defers remote gates when the cycle's Bell
+// pair budget is exhausted.
+//
+// Hardware model (single optical cavity, L=20):
+//   N_comm = 160, P_aa = 0.10, t_attempt = 1.0 us, R_max = 10 MHz
+//   R_Bell = 0.10 x min(160/1.0, 10) = 0.10 x 10 = 1 MHz
+//   T_cycle_baseline = syndrome_bell_demand / R_Bell = 40 / 1 = 40 us
+//   max_bell_pairs_per_cycle(40 us) = floor(1 x 40) = 40
+//   gate_bell_budget = 40 (total) - 40 (syndrome) = 0 extra
+//     No inter-module gates can be scheduled in a cycle with T=40 us
+//     Compiler must increase T_cycle to accommodate remote gates
+//
+// qpu_ids and gate_bell_budget are ordinary architecture fields. This keeps
+// distributed policy in QMRL instead of hard-coding it in the emitter.
+
+RouteInfo:
+    routed_gates = CX
+    GateRealization{u : Location, v : Location, remote : Bool}
+    realize_gate =
+        if (Arch.qpu_ids[State.map[Gate.qubits[0]]]) == Arch.qpu_ids[State.map[Gate.qubits[1]]]
+            then
+                // Local gate: standard connectivity check, no Bell pair cost
+                if Arch.contains_edge((State.map[Gate.qubits[0]], State.map[Gate.qubits[1]]))
+                    then Some(GateRealization{
+                            u = State.map[Gate.qubits[0]],
+                            v = State.map[Gate.qubits[1]],
+                            remote = false
+                         })
+                    else None
+            else
+                // Remote gate: TeleGate via Bell pair. Defer when this cycle
+                // has already consumed the available remote-gate Bell budget.
+                if (fold(0,
+                        |x, acc| -> acc + x,
+                        map(|x| -> if x.implementation.(remote()) then 1 else 0,
+                            State.implemented_gates()))) == Arch.gate_bell_budget
+                    then None
+                    else Some(GateRealization{
+                        u = State.map[Gate.qubits[0]],
+                        v = State.map[Gate.qubits[1]],
+                        remote = true
+                    })
+
+
+TransitionInfo:
+    Transition{edge : (Location, Location)}
+    get_transitions = (map(|x| -> Transition{edge = x}, Arch.edges()))
+                        .push(Transition{edge = (Location(0), Location(0))})
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
+    cost = 0.0
+
+
+ArchInfo:
+    Arch{
+        // Multi-QPU topology fields
+        num_qpus : Int,
+        qpu_sizes : Vec<Int>,
+        qpu_ids : Vec<Int>,
+        link_cost : Float,
+        comm_qubits : Vec<Location>,
+        alg_qubits : Vec<Location>,
+
+        // Bell pair generation hardware parameters
+        n_comm_qubits : Int,
+        bell_success_prob : Float,
+        bell_attempt_interval : Float,
+        max_bell_rate : Float,
+        code_distance : Int,
+
+        // Researcher-chosen QEC cycle time (must exceed syndrome_demand / R_Bell).
+        // budget = floor(R_Bell × t_cycle) - syndrome_demand
+        t_cycle : Float,
+
+        // Precomputed from the hardware fields above for now. QMRL does not yet
+        // have floor/min/< operators, so the example keeps this as architecture data.
+        gate_bell_budget : Int
+    }
+    get_locations = Arch.alg_qubits()
+
+
+StateInfo:
+    // Minimize steps subject to the Bell-pair budget enforced in realize_gate.
+    cost = 1.0

@@ -199,6 +199,8 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
     let user_def_table = UserDefTable::new(file);
     let mut type_map = TypeMap::new();
     let mut string_labels = StringLabels::new();
+    let impl_struct_name = extract_impl_struct_name(file);
+    let arch_fields = extract_arch_fields(file);
 
     // Block Level Validation
     for block in &file.blocks {
@@ -290,6 +292,8 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
                     user_def_table: &user_def_table,
                     generic_table: &mut generic_table,
                     string_labels: &mut string_labels,
+                    impl_struct_name: impl_struct_name.clone(),
+                    arch_fields: &arch_fields,
                 };
 
                 let mut field_type = register_field(&field.value, &mut inf_data);
@@ -324,6 +328,13 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
                                 if types_compatible(inner, &field_type) {
                                     compatible_flag = true;
                                 }
+                            }
+
+                            if field.key == "realize_gate" {
+                                compatible_flag |= realize_gate_return_compatible(
+                                    return_type.as_ref(),
+                                    &field_type,
+                                );
                             }
 
                             if !compatible_flag && types_compatible(return_type, &field_type) {
@@ -408,6 +419,56 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
         type_map: type_map.map,
         user_def_table,
         string_labels,
+    }
+}
+
+fn extract_impl_struct_name(file: &AmaroFile) -> Option<String> {
+    file.blocks
+        .iter()
+        .find(|b| b.kind.eq_ignore_ascii_case("RouteInfo"))
+        .and_then(|b| {
+            let BlockContent::Fields(items) = &b.content;
+            items.iter().find_map(|item| match item {
+                BlockItem::StructDef(s) => Some(s.name.clone()),
+                _ => None,
+            })
+        })
+}
+
+pub(crate) fn extract_arch_fields(file: &AmaroFile) -> HashMap<String, Type> {
+    file.blocks
+        .iter()
+        .find(|b| b.kind.eq_ignore_ascii_case("ArchInfo"))
+        .map(|b| {
+            let BlockContent::Fields(items) = &b.content;
+            items
+                .iter()
+                .find_map(|item| match item {
+                    BlockItem::StructDef(s) => Some(
+                        s.fields
+                            .iter()
+                            .map(|field| {
+                                (
+                                    field.name.clone(),
+                                    Type::from_type_annotation(&field.type_annotation),
+                                )
+                            })
+                            .collect(),
+                    ),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+}
+
+fn arch_field_access_type(t: &Type) -> Type {
+    match t {
+        Type::Vec(_) => Type::Function {
+            params: vec![],
+            return_type: Box::new(t.clone()),
+        },
+        _ => t.clone(),
     }
 }
 
@@ -937,6 +998,8 @@ pub struct InferenceData<'a> {
     pub user_def_table: &'a UserDefTable,
     pub generic_table: &'a mut GenericTable,
     pub string_labels: &'a mut StringLabels,
+    pub impl_struct_name: Option<String>,
+    pub arch_fields: &'a HashMap<String, Type>,
 }
 
 /// Precondition: Expr and all subexpressions have a type (even if unknown) in
@@ -1530,8 +1593,38 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                     None
                 };
 
-                let outcome_type = match type_from_user_def {
-                    Some(t) => t.clone(),
+                let type_from_context = match (&obj_type, field.as_str()) {
+                    (Type::ArchT, _) => inference_data
+                        .arch_fields
+                        .get(field)
+                        .or_else(|| {
+                            inference_data
+                                .user_def_table
+                                .get_fields("Arch")
+                                .and_then(|fields| fields.get(field))
+                        })
+                        .map(arch_field_access_type),
+                    (Type::Gate, "implementation") => inference_data
+                        .impl_struct_name
+                        .as_ref()
+                        .map(|name| Type::UserDef(name.clone())),
+                    (Type::StateT, "implemented_gates") => inference_data
+                        .impl_struct_name
+                        .as_ref()
+                        .map(|name| Type::Function {
+                            params: vec![],
+                            return_type: Box::new(Type::Vec(Box::new(Type::UserDef(name.clone())))),
+                        }),
+                    (Type::UserDef(name), "implementation")
+                        if inference_data.impl_struct_name.as_ref() == Some(name) =>
+                    {
+                        Some(Type::UserDef(name.clone()))
+                    }
+                    _ => None,
+                };
+
+                let outcome_type = match type_from_user_def.cloned().or(type_from_context) {
+                    Some(t) => t,
                     None => match builtins::check_built_in_after_type(&obj_type, field) {
                         Some(builtins::Owner::Owned(built_in)) => built_in.typ.clone(),
                         Some(builtins::Owner::Borrowed(built_in)) => built_in.typ.clone(),
@@ -1971,6 +2064,17 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
     }
 }
 
+fn realize_gate_return_compatible(expected: &Type, actual: &Type) -> bool {
+    match (expected, actual) {
+        (Type::Option(expected_inner), Type::Vec(actual_inner))
+        | (Type::Vec(expected_inner), Type::Option(actual_inner)) => {
+            matches!(actual_inner.as_ref(), Type::Generic(_) | Type::Unknown)
+                || types_compatible(expected_inner, actual_inner)
+        }
+        _ => false,
+    }
+}
+
 /// From a given type, provides all autocomplete suggestions, if they exist.
 /// This would be what appears after the user types a '.'
 pub fn suggest_next_from_type(
@@ -2270,6 +2374,7 @@ mod tests {
     #[test]
     fn test_infer_bin_op_math() {
         let mut diags = Vec::new();
+        let empty_arch_fields = HashMap::new();
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
@@ -2277,6 +2382,8 @@ mod tests {
             user_def_table: &UserDefTable::empty(),
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
+            impl_struct_name: None,
+            arch_fields: &empty_arch_fields,
         };
 
         let def_range = Range {
@@ -2427,6 +2534,7 @@ mod tests {
     #[test]
     fn test_infer_bin_op_logic() {
         let mut diags = Vec::new();
+        let empty_arch_fields = HashMap::new();
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
@@ -2434,6 +2542,8 @@ mod tests {
             user_def_table: &UserDefTable::empty(),
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
+            impl_struct_name: None,
+            arch_fields: &empty_arch_fields,
         };
 
         let def_range = Range {
@@ -2504,6 +2614,7 @@ mod tests {
     #[test]
     fn test_infer_unary() {
         let mut diags = Vec::new();
+        let empty_arch_fields = HashMap::new();
         let mut inf_data = InferenceData {
             sym_table: &mut SymbolTable::new(),
             diagnostics: &mut diags,
@@ -2511,6 +2622,8 @@ mod tests {
             user_def_table: &UserDefTable::empty(),
             generic_table: &mut GenericTable::new(),
             string_labels: &mut StringLabels::new(),
+            impl_struct_name: None,
+            arch_fields: &empty_arch_fields,
         };
 
         let def_range = Range {
