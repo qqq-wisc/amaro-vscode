@@ -42,14 +42,7 @@ TransitionInfo:
 
 
 ArchInfo:
-    Arch{
-        num_qpus : Int,
-        qpu_sizes : Vec<Int>,
-        qpu_ids : Vec<Int>,
-        link_cost : Float,
-        comm_qubits : Vec<Location>,
-        alg_qubits : Vec<Location>
-    }
+    Arch{num_qpus : Int, qpu_sizes : Vec<Int>, qpu_ids : Vec<Int>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location>}
     get_locations = Arch.alg_qubits()
 
 

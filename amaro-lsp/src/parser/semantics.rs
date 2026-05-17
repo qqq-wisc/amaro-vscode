@@ -330,6 +330,13 @@ pub fn check_semantics(file: &AmaroFile) -> SemanticResult {
                                 }
                             }
 
+                            if field.key == "realize_gate" {
+                                compatible_flag |= realize_gate_return_compatible(
+                                    return_type.as_ref(),
+                                    &field_type,
+                                );
+                            }
+
                             if !compatible_flag && types_compatible(return_type, &field_type) {
                                 compatible_flag = true;
                             }
@@ -1606,10 +1613,13 @@ pub fn infer_expr_type(expr: &Expr, inference_data: &mut InferenceData) -> Type 
                         .as_ref()
                         .map(|name| Type::Function {
                             params: vec![],
-                            return_type: Box::new(Type::Vec(Box::new(Type::UserDef(
-                                name.clone(),
-                            )))),
+                            return_type: Box::new(Type::Vec(Box::new(Type::UserDef(name.clone())))),
                         }),
+                    (Type::UserDef(name), "implementation")
+                        if inference_data.impl_struct_name.as_ref() == Some(name) =>
+                    {
+                        Some(Type::UserDef(name.clone()))
+                    }
                     _ => None,
                 };
 
@@ -2050,6 +2060,17 @@ fn types_compatible(t1: &Type, t2: &Type) -> bool {
         }
         (Type::UserDef(n1), Type::UserDef(n2)) => n1 == n2,
         (Type::Generic(_), Type::Generic(_)) => true,
+        _ => false,
+    }
+}
+
+fn realize_gate_return_compatible(expected: &Type, actual: &Type) -> bool {
+    match (expected, actual) {
+        (Type::Option(expected_inner), Type::Vec(actual_inner))
+        | (Type::Vec(expected_inner), Type::Option(actual_inner)) => {
+            matches!(actual_inner.as_ref(), Type::Generic(_) | Type::Unknown)
+                || types_compatible(expected_inner, actual_inner)
+        }
         _ => false,
     }
 }

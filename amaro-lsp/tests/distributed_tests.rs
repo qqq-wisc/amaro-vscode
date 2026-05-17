@@ -18,6 +18,7 @@ use amaro_lsp::parser::{
     GenericTable, InferenceData, StringLabels, TypeMap, check_semantics, infer_expr_type,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tower_lsp::lsp_types::{DiagnosticSeverity, Position, Range};
 
 const SIMPLE_2QPU: &str = include_str!("../test_files/simple_2qpu.qmrl");
@@ -36,7 +37,7 @@ RouteInfo:
 TransitionInfo:
     Transition{edge : (Location, Location)}
     get_transitions = []
-    apply = []
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     cost = 1.0
 "#;
 
@@ -50,25 +51,11 @@ RouteInfo:
 TransitionInfo:
     Transition{edge : (Location, Location)}
     get_transitions = []
-    apply = []
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     cost = 1.0
 
 ArchInfo:
-    Arch{
-        num_qpus : Int,
-        qpu_sizes : Vec<Int>,
-        qpu_ids : Vec<Int>,
-        link_cost : Float,
-        comm_qubits : Vec<Location>,
-        alg_qubits : Vec<Location>,
-        n_comm_qubits : Int,
-        bell_success_prob : Float,
-        bell_attempt_interval : Float,
-        max_bell_rate : Float,
-        code_distance : Int,
-        t_cycle : Float,
-        gate_bell_budget : Int
-    }
+    Arch{num_qpus : Int, qpu_sizes : Vec<Int>, qpu_ids : Vec<Int>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location>, n_comm_qubits : Int, bell_success_prob : Float, bell_attempt_interval : Float, max_bell_rate : Float, code_distance : Int, t_cycle : Float, gate_bell_budget : Int}
     get_locations = Arch.alg_qubits()
 "#;
 
@@ -93,10 +80,12 @@ fn zero_range() -> Range {
 }
 
 fn make_expr(kind: ExprKind) -> Expr {
+    static NEXT_ID: AtomicU32 = AtomicU32::new(1);
+
     Expr {
         kind,
         range: zero_range(),
-        id: NodeId(0),
+        id: NodeId(NEXT_ID.fetch_add(1, Ordering::Relaxed)),
     }
 }
 
@@ -116,6 +105,7 @@ fn extract_impl_struct_name(file: &AmaroFile) -> Option<String> {
 
 fn only_errors(file: &AmaroFile) -> Vec<String> {
     check_semantics(file)
+        .diagnostics
         .into_iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
         .map(|d| d.message)
@@ -126,7 +116,9 @@ fn only_errors(file: &AmaroFile) -> Vec<String> {
 
 #[test]
 fn test_simple_2qpu_parses() {
-    let file = parse_file(SIMPLE_2QPU).expect("simple_2qpu.qmrl should parse without error");
+    let file = parse_file(SIMPLE_2QPU)
+        .expect("simple_2qpu.qmrl should parse without error")
+        .file;
     // RouteInfo, TransitionInfo, ArchInfo, StateInfo
     assert!(
         file.blocks.len() >= 4,
@@ -137,8 +129,9 @@ fn test_simple_2qpu_parses() {
 
 #[test]
 fn test_dist_2qpu_budget_parses() {
-    let file =
-        parse_file(DIST_2QPU_BUDGET).expect("dist_2qpu_budget.qmrl should parse without error");
+    let file = parse_file(DIST_2QPU_BUDGET)
+        .expect("dist_2qpu_budget.qmrl should parse without error")
+        .file;
     assert!(
         file.blocks.len() >= 4,
         "Expected at least 4 blocks, got {}",
@@ -150,7 +143,7 @@ fn test_dist_2qpu_budget_parses() {
 
 #[test]
 fn test_simple_2qpu_no_errors() {
-    let file = parse_file(SIMPLE_2QPU).unwrap();
+    let file = parse_file(SIMPLE_2QPU).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -165,7 +158,7 @@ fn test_simple_2qpu_no_errors() {
 
 #[test]
 fn test_dist_2qpu_budget_no_errors() {
-    let file = parse_file(DIST_2QPU_BUDGET).unwrap();
+    let file = parse_file(DIST_2QPU_BUDGET).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -183,7 +176,7 @@ fn test_dist_2qpu_budget_no_errors() {
 #[test]
 fn test_bool_field_in_gate_realization_no_error() {
     let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -208,7 +201,7 @@ fn test_vec_int_field_type_no_error() {
     let input = format!(
         "{MINIMAL_ROUTE_TRANSITION}\nArchInfo:\n    Arch{{ qpu_sizes : Vec<Int> }}\n    get_locations = []"
     );
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -225,7 +218,7 @@ fn test_arch_num_qpus_field_is_int_type() {
     let input = format!(
         "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if Arch.num_qpus == 2 then 1.0 else 0.0"
     );
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -237,7 +230,7 @@ fn test_arch_num_qpus_field_is_int_type() {
 #[test]
 fn test_arch_link_cost_field_is_float_type() {
     let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = Arch.link_cost");
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -249,7 +242,7 @@ fn test_arch_link_cost_field_is_float_type() {
 #[test]
 fn test_arch_t_cycle_field_is_float_type() {
     let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = Arch.t_cycle");
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -262,7 +255,7 @@ fn test_arch_t_cycle_field_is_float_type() {
 fn test_arch_qpu_sizes_is_vec_int() {
     // Accessing Arch.qpu_sizes should not error
     let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -278,7 +271,7 @@ fn test_qpu_ids_membership_usable_as_condition() {
     let input = format!(
         "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if (Arch.qpu_ids[State.map[Gate.qubits[0]]]) == Arch.qpu_ids[State.map[Gate.qubits[1]]] then 1.0 else 0.0"
     );
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -292,7 +285,7 @@ fn test_gate_bell_budget_field_no_error() {
     let input = format!(
         "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = if Arch.gate_bell_budget == 40 then 1.0 else 0.0"
     );
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -306,7 +299,7 @@ fn test_gate_bell_budget_field_no_error() {
 #[test]
 fn test_impl_struct_name_extracted_from_route_info() {
     let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let name = extract_impl_struct_name(&file);
     assert_eq!(
         name.as_deref(),
@@ -320,7 +313,7 @@ fn test_impl_struct_name_extracted_from_route_info() {
 fn test_gate_realization_fields_in_user_def_table() {
     // UserDefTable built from a file with remote:Bool should expose all three fields
     let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let udt = UserDefTable::new(&file);
     let fields = udt
         .get_fields("GateRealization")
@@ -345,7 +338,7 @@ fn test_gate_realization_fields_in_user_def_table() {
 #[test]
 fn test_gate_implementation_infers_user_def_not_unknown() {
     let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let udt = UserDefTable::new(&file);
     let impl_struct_name = extract_impl_struct_name(&file);
 
@@ -386,7 +379,7 @@ fn test_gate_implementation_infers_user_def_not_unknown() {
 #[test]
 fn test_implemented_gates_infers_vec_user_def_not_unknown() {
     let input = format!("{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = 0.0");
-    let file = parse_file(&input).unwrap();
+    let file = parse_file(&input).unwrap().file;
     let udt = UserDefTable::new(&file);
     let impl_struct_name = extract_impl_struct_name(&file);
 
@@ -449,15 +442,15 @@ RouteInfo:
 TransitionInfo:
     Transition{edge : (Location, Location)}
     get_transitions = []
-    apply = []
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
     cost = 1.0
 
 ArchInfo:
     Arch{ num_qpus : Int, qpu_sizes : Vec<Int>, qpu_ids : Vec<Int>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location> }
     get_locations = Arch.alg_qubits()
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let file = parse_file(input).unwrap().file;
+    let diags = check_semantics(&file).diagnostics;
     let compat_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("compatible types"))
@@ -478,8 +471,8 @@ fn test_dynamic_field_access_on_unknown_produces_no_false_positives() {
     //   (a) "Undefined variable 'remote'" — the index is inside .(expr) syntax
     //   (b) "compatible types" error — then/else are both Float
     let input = format!("{DISTRIBUTED_PREAMBLE}\n{STATEINFO_WITH_IMPLEMENTATION_ACCESS}");
-    let file = parse_file(&input).unwrap();
-    let diags = check_semantics(&file);
+    let file = parse_file(&input).unwrap().file;
+    let diags = check_semantics(&file).diagnostics;
 
     let undef_errors: Vec<_> = diags
         .iter()
@@ -506,7 +499,7 @@ fn test_dynamic_field_access_on_unknown_produces_no_false_positives() {
 
 #[test]
 fn test_nisq_no_errors_after_distributed_changes() {
-    let file = parse_file(NISQ).unwrap();
+    let file = parse_file(NISQ).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -527,7 +520,7 @@ fn test_map_lambda_param_inferred_from_container() {
         "{}\nStateInfo:\n    cost = fold(0.0, |x, acc| -> acc, map(|x| -> x, State.implemented_gates()))\n",
         DISTRIBUTED_PREAMBLE
     );
-    let file = parse_file(&src).unwrap();
+    let file = parse_file(&src).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -547,7 +540,7 @@ fn test_map_lambda_field_access_no_error_with_inferred_param() {
     let src = format!(
         "{DISTRIBUTED_PREAMBLE}\nStateInfo:\n    cost = fold(0.0, |x, acc| -> acc + x, map(|x| -> if x.implementation.(remote()) then 1.0 else 0.0, State.implemented_gates()))\n"
     );
-    let file = parse_file(&src).unwrap();
+    let file = parse_file(&src).unwrap().file;
     let errors = only_errors(&file);
     assert!(
         errors.is_empty(),
@@ -562,7 +555,7 @@ fn test_map_lambda_field_access_no_error_with_inferred_param() {
 
 #[test]
 fn test_nisq_impl_struct_name_extracted() {
-    let file = parse_file(NISQ).unwrap();
+    let file = parse_file(NISQ).unwrap().file;
     let name = extract_impl_struct_name(&file);
     assert_eq!(
         name.as_deref(),
