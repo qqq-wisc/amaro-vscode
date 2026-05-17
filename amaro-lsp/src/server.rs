@@ -6,15 +6,25 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::ast::*;
-use crate::parser::symbols::{self, SymbolTable, Type, UserDefTable};
+use crate::info::{blocks, builtins, fields};
+use crate::parser::symbols::{Type, UserDefTable};
 use crate::parser::{
-    InferenceData, check_semantics, infer_expr_type, parse_file, semantics, utils,
+    ParseOutput, SemanticResult, StringLabels, check_semantics, parse_file, semantics, utils,
 };
+
+#[derive(Debug)]
+pub struct CachedParse {
+    file: AmaroFile,
+    type_map: HashMap<NodeId, Type>,
+    user_def_table: UserDefTable,
+    string_labels: StringLabels,
+}
 
 #[derive(Debug)]
 pub struct Backend {
     pub client: Client,
     pub documents: Arc<RwLock<HashMap<Url, String>>>,
+    pub parse_cache: Arc<RwLock<HashMap<Url, CachedParse>>>,
 }
 
 // Symbol Tree Builder
@@ -22,11 +32,9 @@ pub fn build_document_symbols(file: &AmaroFile) -> Vec<DocumentSymbol> {
     file.blocks
         .iter()
         .map(|block| {
-            let kind = match block.kind.as_str() {
-                "GateRealization" | "Transition" | "Architecture" | "Arch" => SymbolKind::CLASS,
-                "Step" => SymbolKind::FUNCTION,
-                "RouteInfo" | "TransitionInfo" | "ArchInfo" | "StateInfo" => SymbolKind::MODULE,
-                _ => SymbolKind::OBJECT,
+            let kind = match blocks::BlockName::from_string(&block.kind) {
+                Some(_) => SymbolKind::CLASS,
+                None => SymbolKind::OBJECT, // bad block
             };
 
             #[allow(deprecated)]
@@ -113,7 +121,7 @@ fn format_expr_preview(expr: &Expr) -> String {
 
         ExprKind::Lambda { .. } => "|...| -> ...".to_string(),
         ExprKind::IfThenElse { .. } => "if ... then ...".to_string(),
-        ExprKind::LetBinding { name, .. } => format!("let {} = ...", name),
+        ExprKind::LetBinding { name, .. } => format!("let {} = ...", name.string),
 
         ExprKind::BinaryOp { .. } => "expr op expr".to_string(),
         ExprKind::UnaryOp { op, operand } => format!("{:?} {}", op, format_expr_preview(operand)),
@@ -123,7 +131,11 @@ fn format_expr_preview(expr: &Expr) -> String {
         ExprKind::None => "None".to_string(),
 
         ExprKind::Match { scrutinee, arms } => {
-            format!("match {} with ({} arms)", format_expr_preview(scrutinee), arms.len())
+            format!(
+                "match {} with ({} arms)",
+                format_expr_preview(scrutinee),
+                arms.len()
+            )
         }
     }
 }
@@ -295,11 +307,22 @@ fn summarize_expr_detailed(expr: &Expr, depth: usize) -> String {
             if depth < 2 {
                 format!(
                     "|{}| -> {}",
-                    params.join(", "),
+                    params
+                        .iter()
+                        .map(|s| s.string.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     summarize_expr_detailed(body, depth + 1)
                 )
             } else {
-                format!("|{}| -> ...", params.join(", "))
+                format!(
+                    "|{}| -> ...",
+                    params
+                        .iter()
+                        .map(|s| s.string.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
         }
 
@@ -329,14 +352,14 @@ fn summarize_expr_detailed(expr: &Expr, depth: usize) -> String {
             if depth == 0 {
                 format!(
                     "let {} = {}\n      in {}",
-                    name,
+                    name.string,
                     summarize_expr_detailed(value, depth + 1),
                     summarize_expr_detailed(body, depth + 1)
                 )
             } else {
                 format!(
                     "let {} = {} in {}",
-                    name,
+                    name.string,
                     summarize_expr_detailed(value, depth + 1),
                     summarize_expr_detailed(body, depth + 1)
                 )
@@ -379,6 +402,7 @@ impl Backend {
         Backend {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
+            parse_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -388,7 +412,11 @@ impl Backend {
 
         // Syntactic Analysis
         match parse_file(&text) {
-            Ok(file) => {
+            Ok(ParseOutput {
+                file,
+                diagnostics: parse_diags,
+            }) => {
+                diagnostics.extend(parse_diags);
                 // Semantic Checks
                 // #[cfg(debug_assertions)]
                 // {
@@ -396,7 +424,22 @@ impl Backend {
                 //     self.client.log_message(MessageType::INFO, format!("Parsed AST:\n{}", ast_summary)).await;
                 // }
 
-                let mut semantic_errors = check_semantics(&file);
+                let SemanticResult {
+                    diagnostics: mut semantic_errors,
+                    type_map,
+                    user_def_table,
+                    string_labels,
+                } = check_semantics(&file);
+
+                self.parse_cache.write().await.insert(
+                    uri.clone(),
+                    CachedParse {
+                        file,
+                        type_map,
+                        user_def_table,
+                        string_labels,
+                    },
+                );
                 diagnostics.append(&mut semantic_errors);
             }
             Err(e) => {
@@ -427,11 +470,12 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec!['.'.to_string()]),
+                    trigger_characters: Some(vec!['.'.to_string(), '#'.to_string()]),
                     ..Default::default()
                 }),
 
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
 
                 ..Default::default()
             },
@@ -498,7 +542,11 @@ impl LanguageServer for Backend {
             None => return Ok(None),
         };
 
-        if let Ok(file) = parse_file(text) {
+        if let Ok(ParseOutput {
+            file,
+            diagnostics: _parse_diagnostics,
+        }) = parse_file(text)
+        {
             let symbols = build_document_symbols(&file);
             return Ok(Some(DocumentSymbolResponse::Nested(symbols)));
         }
@@ -509,107 +557,204 @@ impl LanguageServer for Backend {
     // triggers autocomplete
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         // get the text doc
+        let completion_context = match params.context {
+            None => return Ok(None),
+            Some(i) => i,
+        };
+        if !matches!(
+            completion_context.trigger_kind,
+            CompletionTriggerKind::TRIGGER_CHARACTER
+        ) {
+            return Ok(None); // only have trigger character completion
+        }
+        let trigger_char = match completion_context.trigger_character {
+            Some(i) => i,
+            None => return Ok(None), // only have trigger character completion
+        };
+
         let uri = params.text_document_position.text_document.uri;
-        let guard = self.documents.read().await;
-        let file_content = guard.get(&uri);
+        let content_guard = self.documents.read().await;
+        let file_content = content_guard.get(&uri);
 
         if file_content.is_none() {
             return Err(Error::new(ErrorCode::InvalidRequest));
         }
 
-        let string_content = file_content.unwrap();
-
         // get original position of cursor. this is after the dot.
         let orig_pos = params.text_document_position.position;
-        // dot needs 2 spaces before the cursor position, for a strange reason!
-        let dot_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(2));
 
-        // determine if . was typed
-        match utils::get_char_at(string_content, dot_pos) {
-            None => {
-                // self.client
-                //     .log_message(
-                //         MessageType::INFO,
-                //         "Position was not within bounds of document.",
-                //     )
-                //     .await;
-                return Ok(None);
-            }
-            Some('.') => {} // matched the dot!
-            Some(_) => {
-                // self.client
-                //     .log_message(
-                //         MessageType::INFO,
-                //         format!("Found character '{}' for completion.",c),
-                //     )
-                //     .await;
-                return Ok(None);
-            } // we matched the dot
+        let char_before_pos = Position::new(orig_pos.line, orig_pos.character.saturating_sub(1));
+
+        match trigger_char.as_str() {
+            "." => self.dot_autocomplete(uri, char_before_pos).await,
+            "#" => self.hash_autocomplete(char_before_pos),
+            _ => Ok(None), // trigger character not one of two, skipping
         }
 
-        // parse the file into expressions
-        let amaro_file = match parse_file(string_content) {
-            Ok(f) => f,
-            Err(_) => return Err(Error::new(ErrorCode::InternalError)),
+        // // determine if . was typed
+        // match utils::get_char_at(string_content, char_before_pos) {
+        //     None => Ok(None),
+        //     Some('.') => self.dot_autocomplete(uri, char_before_pos).await, // matched the dot!
+        //     Some('#') => self.hash_autocomplete(char_before_pos),
+        //     Some(_) => Ok(None),
+        // }
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        // TODO make this more efficient.
+        // right now, we only cache the text and not the expressions & stuff.
+        // this is a lot of repeated work if the user changes hover often
+
+        // get the text doc
+        let uri = params.text_document_position_params.text_document.uri;
+
+        let guard = self.parse_cache.read().await;
+
+        let (amaro_file, type_map, string_labels) = match guard.get(&uri) {
+            None => return Err(Error::new(ErrorCode::InvalidRequest)),
+            Some(t) => (&t.file, &t.type_map, &t.string_labels),
         };
 
-        // so, we have [stuff][.][cursor]
-        // we need to look 2 chars before
-        let before_dot_pos = Position::new(dot_pos.line, dot_pos.character.saturating_sub(1));
+        // get original position of cursor. this is after the dot.
+        let orig_pos = params.text_document_position_params.position;
 
-        // self.client
-        //     .log_message(
-        //         MessageType::INFO,
-        //         format!("Checking for expr at position {:?}", new_pos),
-        //     )
-        //     .await;
+        // first, check field names.
+        // this is necessary to come before the strings for hover, since fields
+        // are also in the string_labels section.
+        let hovered_field = utils::field_name_containing(amaro_file, orig_pos);
+
+        if let Some((block_str_name, field_name, field_range)) = hovered_field {
+            // need to lookup the name
+            if let Some(block_name) = blocks::BlockName::from_string(&block_str_name) {
+                if let Some(field_info) = fields::field_lookup(block_name, field_name.as_str()) {
+                    return Ok(Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: field_info.show_details(),
+                        }),
+                        range: Some(field_range),
+                    }));
+                } else {
+                    // we are done. if we are hovered over a field but we don't
+                    // have an entry, then there's nothing to show
+                    return Ok(None);
+                }
+            } else {
+                // not a valid block, no fields to lookup
+                return Ok(None);
+            }
+        }
+
+        // second, check the strings for hover (for instance, the labels in
+        // lambdas)
+        let hovered_string = string_labels.get_label_info(&orig_pos);
+
+        if let Some((range, _, typ)) = hovered_string {
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: typ.to_markdown_display(),
+                }),
+                range: Some(range),
+            }));
+        }
 
         // find the largest expression containing this position before the dot
-        let containing_expr = utils::largest_expr_containing(&amaro_file, before_dot_pos);
+        let containing_expr = utils::smallest_expr_containing(amaro_file, orig_pos);
+
+        match containing_expr {
+            // if we had an expression containing our goal pos...
+            Ok(e) => match type_map.get(&e.id) {
+                None => Ok(None),
+                Some(t) => Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: t.to_markdown_display(),
+                    }),
+                    range: Some(e.range),
+                })),
+            },
+            // if we lacked an expression containing our goal pos...
+            Err(_) => {
+                // self.client
+                //     .log_message(
+                //         MessageType::INFO,
+                //         "\tNo expression found containing the position.".to_string(),
+                //     )
+                //     .await;
+                Ok(None) //
+            }
+        }
+    }
+
+    // provides the "rust analyzer" style hints for let and lambdas
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+
+        let guard = self.parse_cache.read().await;
+
+        let string_labels = match guard.get(&uri) {
+            None => return Ok(None),
+            Some(t) => &t.string_labels,
+        };
+
+        let res: Vec<InlayHint> = string_labels
+            .get_all_labels_in_range(&params.range)
+            .iter()
+            .map(|elt| InlayHint {
+                position: elt.0.end,
+                label: InlayHintLabel::String(format!(": {}", elt.2)), // todo change this
+                kind: Some(InlayHintKind::TYPE),
+                text_edits: None,
+                tooltip: None,
+                padding_left: Some(true),
+                padding_right: Some(true),
+                data: None,
+            })
+            .collect();
+        Ok(Some(res))
+    }
+}
+
+impl Backend {
+    /// Autocomplete resolver for typing '.'
+    async fn dot_autocomplete(
+        &self,
+        uri: Url,
+        dot_pos: Position,
+    ) -> Result<Option<CompletionResponse>> {
+        // so, we have [stuff][.][cursor]
+        // we need to look 1 char before
+        let before_dot_pos = Position::new(dot_pos.line, dot_pos.character.saturating_sub(1));
+
+        let parse_guard = self.parse_cache.read().await;
+        let cached_parse = match parse_guard.get(&uri) {
+            None => return Err(Error::new(ErrorCode::InvalidRequest)),
+            Some(p) => p,
+        };
+        // find the largest expression containing this position before the dot
+        let containing_expr = utils::largest_expr_containing(&cached_parse.file, before_dot_pos);
 
         match containing_expr {
             // if we had an expression containing our goal pos...
             Ok(e) => {
-                // self.client
-                //     .log_message(
-                //         MessageType::INFO,
-                //         format!("\tFound expression {} containing position.", e.kind),
-                //     )
-                //     .await;
-
-                // first, get user-defined structs
-                let user_def_table = UserDefTable::new(&amaro_file);
-
-                let mut sym_table = SymbolTable::new();
-                let mut type_map: HashMap<NodeId, Type> = HashMap::new();
-                let mut diags: Vec<Diagnostic> = Vec::new();
-
-                let mut inf_data = InferenceData {
-                    sym_table: &mut sym_table,
-                    diagnostics: &mut diags,
-                    type_map: &mut type_map,
-                    user_def_table: &user_def_table,
-                };
-
-                // explore the expr
-                infer_expr_type(e, &mut inf_data);
-
                 // now, need to find the expr right before our cursor, and get
                 // the type of that one.
-                // expr should end at the dot i think?
-                let goal_pos = Position::new(dot_pos.line, dot_pos.character.saturating_add(1));
-
-                match utils::find_finishing_subexpr(e, goal_pos) {
+                match utils::find_finishing_subexpr(
+                    e,
+                    Position::new(dot_pos.line, dot_pos.character.saturating_add(1)),
+                ) {
+                    // TODO explain why we're using this position here...
                     Some(perfect_end_expr) => {
                         // self.client
                         //     .log_message(
                         //         MessageType::INFO,
-                        //         format!("\tFound perfectly finishing expression {}", perfect_end_expr.kind),
+                        //         format!("\tAt dot pos {:?}, found perfectly finishing expression {}", dot_pos,perfect_end_expr.summarize()),
                         //     )
                         //     .await;
 
                         // get the types and stuff
-                        let found_type = match type_map.get(&perfect_end_expr.id) {
+                        let found_type = match cached_parse.type_map.get(&perfect_end_expr.id) {
                             Some(t) => t,
                             None => return Err(Error::new(ErrorCode::InternalError)),
                         };
@@ -617,30 +762,20 @@ impl LanguageServer for Backend {
                         // self.client
                         //     .log_message(
                         //         MessageType::INFO,
-                        //         format!("\tHas type {:?}", found_type),
+                        //         format!("\tExpr has type type {:?}", found_type),
                         //     )
                         //     .await;
 
-                        match semantics::suggest_next_from_type(found_type, &user_def_table) {
-                            Some(suggestions) => Ok(Some(CompletionResponse::Array(
-                                suggestions
-                                    .iter()
-                                    .map(|sug| sug.to_completion_item())
-                                    .collect(),
-                            ))),
+                        match semantics::suggest_next_from_type(
+                            found_type,
+                            &cached_parse.user_def_table,
+                        ) {
+                            Some(suggestions) => Ok(Some(CompletionResponse::Array(suggestions))),
                             None => Ok(None), // don't show suggestions then!
                         }
                     }
                     // expression doesn't end at anything
-                    None => {
-                        // self.client
-                        //     .log_message(
-                        //         MessageType::INFO,
-                        //         "\tNo perfect ending expression found.".to_string(),
-                        //     )
-                        //     .await;
-                        Ok(None)
-                    }
+                    None => Ok(None),
                 }
             }
             // if we lacked an expression containing our goal pos...
@@ -655,115 +790,18 @@ impl LanguageServer for Backend {
             }
         }
     }
-
-    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        // TODO make this more efficient.
-        // right now, we only cache the text and not the expressions & stuff.
-        // this is a lot of repeated work if the user changes hover often
-
-        // self.client
-        //     .log_message(
-        //         MessageType::INFO,
-        //         "We are trying to hover.".to_string(),
-        //     )
-        //     .await;
-
-        // get the text doc
-        let uri = params.text_document_position_params.text_document.uri;
-        let guard = self.documents.read().await;
-        let file_content = guard.get(&uri);
-
-        if file_content.is_none() {
-            return Err(Error::new(ErrorCode::InvalidRequest));
-        }
-
-        let string_content = file_content.unwrap();
-
-        // get original position of cursor. this is after the dot.
-        let orig_pos = params.text_document_position_params.position;
-
-        // parse the file into expressions
-        let amaro_file = match parse_file(string_content) {
-            Ok(f) => f,
-            Err(_) => return Err(Error::new(ErrorCode::InternalError)),
-        };
-
-        // first, check field names.
-        let hovered_field = utils::field_name_containing(&amaro_file, orig_pos);
-
-        if let Some((field_name, field_range)) = hovered_field {
-            // need to lookup the name
-            if let Some(field_type) = symbols::field_lookup(&field_name) {
-                return Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::PlainText,
-                        value: format!("{}", field_type),
-                    }),
-                    range: Some(field_range),
-                }));
-            } else {
-                // we are done. if we are hovered over a field but we don't
-                // have an entry, then there's nothing to show...
-                // LS: Would be good to display something indicating that the
-                // thing we are hovering over is not recognized by the program
-                return Ok(None);
-            }
-        }
-
-        // find the largest expression containing this position before the dot
-        let containing_expr = utils::smallest_expr_containing(&amaro_file, orig_pos);
-
-        match containing_expr {
-            // if we had an expression containing our goal pos...
-            Ok(e) => {
-                // self.client
-                //     .log_message(
-                //         MessageType::INFO,
-                //         format!("\tFound expression {} containing position.", e.kind),
-                //     )
-                //     .await;
-
-                // first, get user-defined structs
-                let user_def_table = UserDefTable::new(&amaro_file);
-
-                let mut sym_table = SymbolTable::new();
-                let mut type_map: HashMap<NodeId, Type> = HashMap::new();
-                let mut diags: Vec<Diagnostic> = Vec::new();
-
-                let mut inf_data = InferenceData {
-                    sym_table: &mut sym_table,
-                    diagnostics: &mut diags,
-                    type_map: &mut type_map,
-                    user_def_table: &user_def_table,
-                };
-
-                // explore the expr
-                let inferred_type = infer_expr_type(e, &mut inf_data);
-                // self.client
-                //     .log_message(
-                //         MessageType::INFO,
-                //         format!("\tFound the type {}", inferred_type),
-                //     )
-                //     .await;
-
-                Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::PlainText,
-                        value: format!("{}", inferred_type),
-                    }),
-                    range: Some(e.range),
-                }))
-            }
-            // if we lacked an expression containing our goal pos...
-            Err(_) => {
-                // self.client
-                //     .log_message(
-                //         MessageType::INFO,
-                //         "\tNo expression found containing the position.".to_string(),
-                //     )
-                //     .await;
-                Ok(None) //
-            }
-        }
+    fn hash_autocomplete(&self, hash_pos: Position) -> Result<Option<CompletionResponse>> {
+        let end_pos = Position::new(hash_pos.line, hash_pos.character.saturating_add(1));
+        let range = Range::new(hash_pos, end_pos);
+        let completion_item_vec: Vec<CompletionItem> = builtins::get_all_raw_built_ins()
+            .iter()
+            .map(|elt| {
+                elt.to_completion_item(Some(vec![TextEdit {
+                    range,
+                    new_text: "".to_string(),
+                }]))
+            })
+            .collect();
+        Ok(Some(CompletionResponse::Array(completion_item_vec)))
     }
 }

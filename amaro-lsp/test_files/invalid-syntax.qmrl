@@ -1,0 +1,8 @@
+RouteInfo:
+    routed_gates = CX
+    GateRealization{u : Location}
+    realize_gate = Vec().push(GateRealization{u: State.map[Gate.qubits[0]]})
+TransitionInfo:
+    get_transitions = []
+    apply = identity_application(step)
+    cost = 0.0

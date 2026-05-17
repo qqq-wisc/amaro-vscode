@@ -1,26 +1,6 @@
 use amaro_lsp::parser::symbols::*;
 
 #[test]
-fn test_symbol_table_initialization() {
-    let table = SymbolTable::new();
-
-    assert!(matches!(table.lookup("Arch"), Some(Type::ArchT)));
-    assert!(matches!(table.lookup("State"), Some(Type::StateT)));
-    assert!(matches!(table.lookup("Gate"), Some(Type::Gate)));
-
-    assert!(matches!(table.lookup("CX"), Some(Type::Gate)));
-    assert!(matches!(table.lookup("T"), Some(Type::Gate)));
-    assert!(matches!(table.lookup("H"), Some(Type::Gate)));
-
-    assert!(matches!(table.lookup("map"), Some(Type::Function { .. })));
-    assert!(matches!(table.lookup("fold"), Some(Type::Function { .. })));
-    assert!(matches!(
-        table.lookup("value_swap"),
-        Some(Type::Function { .. })
-    ));
-}
-
-#[test]
 fn test_scope_management() {
     let mut table = SymbolTable::new();
 

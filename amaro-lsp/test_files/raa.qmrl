@@ -1,0 +1,118 @@
+GateRealization[
+    routed_gates = CX
+    name = 'RAAGate'
+    data = (src : Location, dst : Location)
+    realize_gate = if consistent(to_2d(Step.map[Gate.qubits[0]]), to_2d(Step.map[Gate.qubits[1]]), 
+                        map(|x| -> 
+                            Vec().push(to_2d(x.implementation().u)).push(x.implementation().v)))
+                    then 
+                        if
+                            consistent(to_2d(Step.map[Gate.qubits[1]]), to_2d(Step.map[Gate.qubits[0]]), 
+                                map(|x| -> 
+                                    Vec().push(to_2d(x.implementation().u)).push(x.implementation().v)))
+                            then Vec.push(GateRealization{src=Step.map[Gate.qubits[0]], dst=Step.map[Gate.qubits[1]]})
+                                    .push(GateRealization{src=Step.map[Gate.qubits[1]], dst=Step.map[Gate.qubits[0]]})
+                            else Vec.push(GateRealization{src=Step.map[Gate.qubits[0]], dst=Step.map[Gate.qubits[1]]})
+                    else 
+                        if
+                            consistent(to_2d(Step.map[Gate.qubits[1]]), to_2d(Step.map[Gate.qubits[0]]), 
+                                map(|x| -> 
+                                    Vec().push(to_2d(x.implementation().u)).push(x.implementation().v)))
+                            then Vec.push(GateRealization{src=Step.map[Gate.qubits[1]], dst=Step.map[Gate.qubits[0]]})
+                            else Vec()
+]
+Transition[
+    name = 'RAATrans'
+    data = (edge : (Location,Location), cost : Float)
+    get_transitions = raa_transitions_dyn_map(Step, Arch)
+    apply = value_swap(Transition.edge.(0), Transition.edge.(1))
+    cost = Transition.cost
+]
+
+Arch[
+    data = (width : Int, height : Int)
+]
+Step[
+    cost = raa_step_cost(Step, Arch)
+            
+]
+{{
+fn raa_step_cost(step: &Step<RAAGate>, arch: &CustomArch) -> f64 {
+    let mut cost = 0.0;
+    let mut max_dist = 0.0;
+    for gate in &step.gates() {
+        let ctrl_coords = (
+            step.map[&gate.qubits[0]].get_index() / arch.height,
+            step.map[&gate.qubits[0]].get_index() % arch.height,
+        );
+        let tar_coords = (
+            step.map[&gate.qubits[1]].get_index() / arch.height,
+            step.map[&gate.qubits[0]].get_index() % arch.height,
+        );
+        let dist = f64::sqrt(
+            (ctrl_coords.0 as f64 - tar_coords.0 as f64).powi(2)
+                + (ctrl_coords.1 as f64 - tar_coords.1 as f64).powi(2),
+        );
+        if dist > max_dist {
+            max_dist = dist;
+        }
+    }
+    let move_time = f64::sqrt(2.5 * RYDBERG_RADIUS * max_dist / ACCELERATION_CONST);
+    let gates = step.gates();
+    let active_qubits: HashSet<&Qubit> = gates.iter().flat_map(|g| &g.qubits).collect();
+    let active_qubit_count = active_qubits.len();
+    let inactive_qubit_count = step.map.len() - active_qubit_count;
+    cost += -f64::ln(TWO_QUBIT_GATE_FIDELITY) * (gates.len() as f64);
+    cost += -f64::ln(ATOM_TRANSFER_FIDELITY) * (active_qubit_count as f64);
+    for _ in 1..active_qubit_count {
+        cost += -f64::ln(1.0 - (move_time / T2));
+    }
+    for _ in 1..inactive_qubit_count {
+        cost += -f64::ln(1.0 - (move_time + 4.0 * ATOM_TRANSFER_TIME) / T2);
+        cost += -f64::ln(EXCITEMENT_FIDELITY);
+    }
+    return cost;
+}
+fn raa_transitions_dyn_map(step: &RaaStep, arch: &RaaArchitecture) -> Vec<RaaMove> {
+    let mut moves = Vec::new();
+    let impls = step
+        .implemented_gates
+        .iter()
+        .map(|gi| gi.implementation.clone());
+    for raa_move in impls {
+        let aod_qubit = step
+            .map
+            .iter()
+            .find(|(_q, l)| *l == &raa_move.src)
+            .unwrap()
+            .0;
+        let slm_qubit = step
+            .map
+            .iter()
+            .find(|(_q, l)| *l == &raa_move.dst)
+            .unwrap()
+            .0;
+        for dst in arch.locations() {
+            if !(step.map.values().any(|v| v == &dst && v != &raa_move.src)) {
+                let src_coords = (
+                    step.map.get(slm_qubit).unwrap().get_index() / arch.height,
+                    step.map.get(slm_qubit).unwrap().get_index() % arch.height,
+                );
+                let dst_coords = (dst.get_index() / arch.height, dst.get_index() % arch.height);
+                let dist = f64::sqrt(
+                    (src_coords.0 as f64 - dst_coords.0 as f64).powi(2)
+                        + (src_coords.1 as f64 - dst_coords.1 as f64).powi(2),
+                );
+                let move_time = f64::sqrt(2.5 * RYDBERG_RADIUS * dist / ACCELERATION_CONST);
+                let cost = -f64::ln(1.0 - move_time / T2);
+                moves.push(RaaMove {
+                    qubit: *aod_qubit,
+                    dst,
+                    cost,
+                });
+            }
+        }
+    }
+    return moves;
+}
+}}

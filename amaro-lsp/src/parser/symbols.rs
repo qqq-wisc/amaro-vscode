@@ -1,11 +1,23 @@
-use std::{collections::HashMap, fmt::Write};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Write,
+};
 
-use crate::ast::TypeAnnotation;
+use crate::{ast::TypeAnnotation, parser::FetchAndAdd};
 
 /// The type system for Amaro expressions.
 ///
+/// Each expression has a Type.
+///
 /// Represents all possible types that can appear in the language, including
 /// primitives, quantum-specific types, compound types, and function signatures.
+///
+/// Some types are special and perhaps obtuse. They are:
+/// - UserDef
+/// - Generic
+/// - Unknown
+///
+/// See more about these below.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub enum Type {
@@ -38,20 +50,44 @@ pub enum Type {
     },
 
     // Struct types
-    Struct {
-        // TODO work to merge UserDef and Struct into one.
-        name: String,
-        fields: HashMap<String, Type>,
-    },
+    /// Users can define structs, such as GateRealization and Transition.
+    /// These are called UserDef, where the String is the name of the struct.
+    /// Whenever a user defines a struct, information about its fields are
+    /// stored in a UserDefTable, which can be referenced to determine the
+    /// type of indexing off of a UserDef.
     UserDef(String),
 
     // Generic
+    /// Oftentimes a type must use generic types. Use this in place of things
+    /// like <T> or <H> or whatever. The passed u8 corresponds to the "name" of
+    /// the variable used. So, all types that should be type T need to have the
+    /// same u8 locally, and all the types that should be type H need to have
+    /// the same u8 locally, but distinct from T. Just like normal generics.
+    ///
+    /// Throughout the semantic checking process, generics are resolved locally
+    /// and conflicts are taken care of. For instance, recognize that the Vec()
+    /// function has the type Vec(Generic(0)). So, if I do Vec().push(Vec()),
+    /// then in doing so, each Vec is assigned a different generic value by the
+    /// system, before the generics are resolved. This means conflicts won't
+    /// occur with generics of equal values, because generics are resolved
+    /// locally and not globally.
+    ///
+    /// Warning that there will be issues if there are more than 256 different
+    /// generic types in a single expression. Can simply increase from u8 to u16
+    /// TODO increase from u8 to u16
     Generic(u8), // local id for generic is the u8
 
+    /// Unknown is used when there are details about the language we are
+    /// uncertain of, OR if a user provides some bad input and we don't wish to
+    /// propagate errors. By setting a type as Unknown, we ensure that the
+    /// program will be "kind" to the type going forward and not report errors
+    /// about it.
     Unknown,
 }
 
 impl Type {
+    /// Turns a TypeAnnotation from the parser into a Type that's useable by
+    /// the semantic checker
     pub fn from_type_annotation(type_annotation: &TypeAnnotation) -> Self {
         match type_annotation {
             TypeAnnotation::Simple(name) => match name.as_str() {
@@ -73,14 +109,14 @@ impl Type {
             TypeAnnotation::Generic(name, type_annotations) => match name.as_str() {
                 "Vec" => {
                     if type_annotations.len() != 1 {
-                        Type::Unknown
+                        Type::Generic(0) // TODO should this be generic or unknown?
                     } else {
                         Type::Vec(Box::new(Self::from_type_annotation(&type_annotations[0])))
                     }
                 }
                 "Option" => {
                     if type_annotations.len() != 1 {
-                        Type::Unknown
+                        Type::Generic(0) // TODO should this be generic or unknown?
                     } else {
                         Type::Option(Box::new(Self::from_type_annotation(&type_annotations[0])))
                     }
@@ -100,6 +136,210 @@ impl Type {
                 params: params.iter().map(Self::from_type_annotation).collect(),
                 return_type: Box::new(Self::from_type_annotation(return_type)),
             },
+        }
+    }
+
+    /// Use this for rendering type to markdown display
+    pub fn to_markdown_display(&self) -> String {
+        format!("```rust\n{}\n```", self._to_markdown_display_visitor())
+    }
+    fn _to_markdown_display_visitor(&self) -> String {
+        match self {
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::Unknown
+            | Type::UserDef(_)
+            | Type::Generic(_) => format!("{}", self), // fall back to default, no nesting
+            Type::Function {
+                params,
+                return_type,
+            } => {
+                let mut iter = params.iter();
+                let mut string = String::new();
+                if let Some(first) = iter.next() {
+                    string += first._to_markdown_display_visitor().as_str();
+                    for item in iter {
+                        string += ", ";
+                        string += item._to_markdown_display_visitor().as_str();
+                    }
+                }
+                format!(
+                    "|{}| -> {}",
+                    string,
+                    return_type._to_markdown_display_visitor().as_str()
+                )
+            }
+            Type::Tuple(items) => {
+                let mut iter = items.iter();
+                let mut string = String::new();
+                if let Some(first) = iter.next() {
+                    string += first._to_markdown_display_visitor().as_str();
+                    for item in iter {
+                        string += ", ";
+                        string += item._to_markdown_display_visitor().as_str();
+                    }
+                }
+                format!("({})", string)
+            }
+            Type::Vec(inner) => format!("Vec<{}>", inner._to_markdown_display_visitor()),
+            Type::Option(inner) => format!("Option<{}>", inner._to_markdown_display_visitor()),
+        }
+    }
+
+    /// Determines whether the type has generics somewhere within it
+    pub fn contains_generic(&self) -> bool {
+        match self {
+            Type::Generic(_) => true,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::UserDef(_)
+            | Type::Unknown => false,
+            Type::Vec(inner) => inner.contains_generic(),
+            Type::Tuple(items) => items.iter().any(|f| f.contains_generic()),
+            Type::Option(inner) => inner.contains_generic(),
+            Type::Function {
+                params,
+                return_type,
+            } => return_type.contains_generic() || params.iter().any(|f| f.contains_generic()),
+        }
+    }
+
+    /// Determines whether the type has generics or unknowns somewhere within it
+    pub fn contains_generic_or_unknown(&self) -> bool {
+        match self {
+            Type::Unknown => true,
+            Type::Generic(_) => true,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::UserDef(_) => false,
+            Type::Vec(inner) => inner.contains_generic_or_unknown(),
+            Type::Tuple(items) => items.iter().any(|f| f.contains_generic_or_unknown()),
+            Type::Option(inner) => inner.contains_generic_or_unknown(),
+            Type::Function {
+                params,
+                return_type,
+            } => {
+                return_type.contains_generic_or_unknown()
+                    || params.iter().any(|f| f.contains_generic_or_unknown())
+            }
+        }
+    }
+
+    /// Given a type that has generics (usually from built-ins), makes the
+    /// generics unique by shifting them forward accoridng to the
+    /// next_generic_num
+    pub fn make_generics_unique(&mut self, next_generic_num: &mut FetchAndAdd<u8>) {
+        let mut generic_set: HashSet<u8> = HashSet::new();
+        self.generic_visitor(&mut generic_set);
+
+        if generic_set.is_empty() {
+            return; // nothing else to do
+        }
+
+        // ok great. now, devise generic shifts.
+        // maps from previos value to new value
+        let generic_shifts: HashMap<u8, u8> = generic_set
+            .iter()
+            .map(|elt| (*elt, next_generic_num.fetch_and_add()))
+            .collect();
+
+        // now finally, apply these shifts.
+        self.generic_shift_applicator(&generic_shifts);
+    }
+
+    /// Visits a type, and identifies all the generic numbers inside.
+    fn generic_visitor(&self, set: &mut HashSet<u8>) {
+        match self {
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::UserDef(_)
+            | Type::Unknown => { /* do nothing */ }
+            Type::Vec(inner) => inner.generic_visitor(set),
+            Type::Tuple(items) => items.iter().for_each(|elt| elt.generic_visitor(set)),
+            Type::Option(inner) => inner.generic_visitor(set),
+            Type::Function {
+                params,
+                return_type,
+            } => {
+                params.iter().for_each(|elt| elt.generic_visitor(set));
+                return_type.generic_visitor(set);
+            }
+            Type::Generic(c) => {
+                set.insert(*c);
+            }
+        }
+    }
+
+    /// Visits a type, and maps all generics from one value to another using
+    /// the shifts HashMap.
+    fn generic_shift_applicator(&mut self, shifts: &HashMap<u8, u8>) {
+        match self {
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Location
+            | Type::Qubit
+            | Type::QubitMap
+            | Type::Gate
+            | Type::ArchT
+            | Type::StateT
+            | Type::InstrT
+            | Type::UserDef(_)
+            | Type::Unknown => { /* do nothing */ }
+            Type::Vec(inner) => inner.generic_shift_applicator(shifts),
+            Type::Tuple(items) => items
+                .iter_mut()
+                .for_each(|elt| elt.generic_shift_applicator(shifts)),
+            Type::Option(inner) => inner.generic_shift_applicator(shifts),
+            Type::Function {
+                params,
+                return_type,
+            } => {
+                params
+                    .iter_mut()
+                    .for_each(|elt| elt.generic_shift_applicator(shifts));
+                return_type.generic_shift_applicator(shifts);
+            }
+            Type::Generic(c) => {
+                *self = Type::Generic(*shifts.get(c).unwrap());
+            }
         }
     }
 }
@@ -139,20 +379,19 @@ impl std::fmt::Display for Type {
                 params,
                 return_type,
             } => {
-                f.write_char('(')?;
+                f.write_char('|')?;
                 let mut iter = params.iter();
                 if let Some(first) = iter.next() {
-                    write!(f, "{}", first)?;
+                    first.fmt(f)?;
                     for item in iter {
                         f.write_str(", ")?;
-                        write!(f, "{}", item)?;
+                        item.fmt(f)?;
                     }
                 }
-                f.write_str(") -> ")?;
+                f.write_str("| -> ")?;
                 return_type.fmt(f)
             }
             Type::UserDef(name) => f.write_str(name),
-            Type::Struct { name, .. } => f.write_str(name),
             Type::Generic(c) => write!(f, "T{}", c),
             Type::Unknown => f.write_char('?'),
         }
@@ -162,84 +401,16 @@ impl std::fmt::Display for Type {
 /// A scoped symbol table for tracking variable bindings and their types.
 ///
 /// Uses a stack of scopes to support nested let-bindings and lambda parameters.
-/// The global scope contains all built-in functions and type constructors.
 pub struct SymbolTable {
     // bindings: HashMap<String, Type>,
     scopes: Vec<HashMap<String, Type>>,
 }
 
-/// There are user-defined types, like Transition.
-/// We need to have ONE place where we store these types.
-/// Then, we can reference these types from here by name.
-pub struct UserDefTable {
-    /// maps from type names (like Transition) to their fields
-    map: HashMap<String, UserDefEntry>,
-}
-
-struct UserDefEntry {
-    fields: HashMap<String, Type>,
-}
-
-impl UserDefTable {
-    /// Given an AmaroFile, creates a UserDefTable which determines the fields
-    /// of user-defined types.
-    pub fn new(file: &crate::ast::AmaroFile) -> Self {
-        // TODO work on adding diagnostics in the case of errors
-        let mut map: HashMap<String, UserDefEntry> = HashMap::new();
-
-        for block in &file.blocks {
-            let crate::ast::BlockContent::Fields(items) = &block.content;
-            items
-                .iter()
-                .filter_map(|elt| match elt {
-                    crate::ast::BlockItem::Field(_) => None,
-                    crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
-                    crate::ast::BlockItem::ReturnKeyword { .. } => None,
-                })
-                .for_each(|struct_def| {
-                    let fields = struct_def
-                        .fields
-                        .iter()
-                        .map(|elt| {
-                            (
-                                elt.name.clone(),
-                                Type::from_type_annotation(&elt.type_annotation),
-                            )
-                        })
-                        .collect();
-                    map.insert(struct_def.name.clone(), UserDefEntry { fields });
-                })
-        }
-
-        UserDefTable { map }
-    }
-
-    /// Creates an empty UserDefTable. Useful if it is known that there are no
-    /// user-defined types.
-    #[cfg(test)]
-    pub fn empty() -> Self {
-        Self {
-            map: HashMap::new(),
-        }
-    }
-
-    /// Gets the fields of a user-defined type, if the type has a definition.
-    pub fn get_fields(&self, identifier: &str) -> Option<&HashMap<String, Type>> {
-        self.map.get(identifier).map(|elt| &elt.fields)
-    }
-}
-
 impl SymbolTable {
     /// Creates a new symbol table with all built-in types and functions registered.
     pub fn new() -> Self {
-        let mut global_scope = HashMap::new();
-
-        Self::register_context_vars(&mut global_scope);
-        Self::register_constructors(&mut global_scope);
-        Self::register_gate_literals(&mut global_scope);
-        Self::register_builtin_functions(&mut global_scope);
         SymbolTable {
-            scopes: vec![global_scope],
+            scopes: vec![HashMap::new()],
         }
     }
 
@@ -271,253 +442,6 @@ impl SymbolTable {
         }
         None
     }
-
-    /// Registers context variables (Arch, State, Gate, Transition, etc.).
-    fn register_context_vars(scope: &mut HashMap<String, Type>) {
-        scope.insert("Arch".to_string(), Type::ArchT);
-        scope.insert("arch".to_string(), Type::ArchT);
-        scope.insert("State".to_string(), Type::StateT);
-        // Old-format files use 'Step' (capitalized) as the state context variable.
-        scope.insert("Step".to_string(), Type::StateT);
-        scope.insert("Gate".to_string(), Type::Gate);
-        scope.insert("step".to_string(), Type::Int);
-        scope.insert(
-            "Transition".to_string(),
-            Type::UserDef("Transition".to_string()),
-        );
-        scope.insert(
-            "GateRealization".to_string(),
-            Type::UserDef("GateRealization".to_string()), 
-        );
-    }
-
-    /// Registers type constructors (Location, Qubit, Vec).
-    fn register_constructors(scope: &mut HashMap<String, Type>) {
-        scope.insert(
-            "Qubit".to_string(),
-            Type::Function {
-                params: vec![Type::Int],
-                return_type: Box::new(Type::Qubit),
-            },
-        );
-        scope.insert(
-            "Location".to_string(),
-            Type::Function {
-                params: vec![Type::Int],
-                return_type: Box::new(Type::Location),
-            },
-        );
-        scope.insert(
-            "Vec".to_string(),
-            Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Vec(Box::new(Type::Unknown))),
-            },
-        );
-    }
-
-    /// Registers gate literals (CX, T, Pauli, etc.) as Gate type.
-    fn register_gate_literals(scope: &mut HashMap<String, Type>) {
-        for gate in [
-            "CX",
-            "T",
-            "Pauli",
-            "PauliMeasurement",
-            "H",
-            "CZ",
-            "X",
-            "Y",
-            "Z",
-            "S",
-            "Sdg",
-            "Tdg",
-            "RX",
-            "RY",
-            "RZ",
-        ] {
-            scope.insert(gate.to_string(), Type::Gate);
-        }
-    }
-
-    /// Registers built-in helper functions (map, fold, all_paths, steiner_trees, etc.).
-    fn register_builtin_functions(scope: &mut HashMap<String, Type>) {
-        // Quantum map operations
-        scope.insert(
-            "value_swap".to_string(),
-            Type::Function {
-                params: vec![Type::Location, Type::Location],
-                return_type: Box::new(Type::QubitMap),
-            },
-        );
-
-        scope.insert(
-            "values".to_string(),
-            Type::Function {
-                params: vec![Type::QubitMap],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-
-        scope.insert(
-            "identity_application".to_string(),
-            Type::Function {
-                params: vec![Type::Unknown],
-                return_type: Box::new(Type::Unknown),
-            },
-        );
-
-        // Higher-order
-        scope.insert(
-            "map".to_string(),
-            Type::Function {
-                params: vec![Type::Unknown, Type::Vec(Box::new(Type::Unknown))],
-                return_type: Box::new(Type::Vec(Box::new(Type::Unknown))),
-            },
-        );
-
-        scope.insert(
-            "fold".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::Unknown,
-                    Type::Unknown,
-                    Type::Vec(Box::new(Type::Unknown)),
-                ],
-                return_type: Box::new(Type::Unknown),
-            },
-        );
-
-        // Neighbor functions
-        scope.insert(
-            "vertical_neighbors".to_string(),
-            Type::Function {
-                params: vec![Type::Location, Type::Int, Type::Int],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-        scope.insert(
-            "horizontal_neighbors".to_string(),
-            Type::Function {
-                params: vec![Type::Location, Type::Int],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-
-        // Path functions
-        scope.insert(
-            "path".to_string(),
-            Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-        scope.insert(
-            "tree".to_string(),
-            Type::Function {
-                params: vec![],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-        scope.insert(
-            "all_paths".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::ArchT,
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::Vec(Box::new(Type::Location)),
-                ],
-                return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))),
-            },
-        );
-        scope.insert(
-            "shortest_path".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::ArchT,
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::Vec(Box::new(Type::Location)),
-                ],
-                return_type: Box::new(Type::Option(Box::new(Type::Vec(Box::new(Type::Location))))),
-            },
-        );
-        scope.insert(
-            "steiner_trees".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::ArchT,
-                    Type::Vec(Box::new(Type::Vec(Box::new(Type::Location)))),
-                    Type::Vec(Box::new(Type::Location)),
-                ],
-                return_type: Box::new(Type::Vec(Box::new(Type::Location))),
-            },
-        );
-
-        // Consistency check: validates a path is consistent with a qubit map
-        scope.insert(
-            "consistent".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::Vec(Box::new(Type::Location)),
-                    Type::QubitMap,
-                ],
-                return_type: Box::new(Type::Bool),
-            },
-        );
-
-        // 2D adjacency conversion: converts edge list to adjacency lists
-        scope.insert(
-            "to_2d".to_string(),
-            Type::Function {
-                params: vec![
-                    Type::Vec(Box::new(Type::Tuple(vec![Type::Location, Type::Location]))),
-                ],
-                return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Location))))),
-            },
-        );
-
-        // k-combinations of a list (generic over element type)
-        scope.insert(
-            "combinations".to_string(),
-            Type::Function {
-                params: vec![Type::Vec(Box::new(Type::Unknown)), Type::Int],
-                return_type: Box::new(Type::Vec(Box::new(Type::Vec(Box::new(Type::Unknown))))),
-            },
-        );
-
-        // Numeric utilities
-        scope.insert(
-            "max".to_string(),
-            Type::Function {
-                params: vec![Type::Int, Type::Int],
-                return_type: Box::new(Type::Int),
-            },
-        );
-        scope.insert(
-            "min".to_string(),
-            Type::Function {
-                params: vec![Type::Int, Type::Int],
-                return_type: Box::new(Type::Int),
-            },
-        );
-        scope.insert(
-            "abs".to_string(),
-            Type::Function {
-                params: vec![Type::Int],
-                return_type: Box::new(Type::Int),
-            },
-        );
-
-        // Grid distance between two locations
-        scope.insert(
-            "dist".to_string(),
-            Type::Function {
-                params: vec![Type::Location, Type::Location],
-                return_type: Box::new(Type::Int),
-            },
-        );
-    }
 }
 
 impl Default for SymbolTable {
@@ -526,75 +450,73 @@ impl Default for SymbolTable {
     }
 }
 
-/// Blocks have fields.
-/// Fields each have an expected type signature.
-/// For instance, 'cost' maps from Transition to Float.
-/// This lets us lookup the expected type signature of a field.
-pub fn field_lookup(field: &str) -> Option<Type> {
-    match field {
-        "cost" => Some(Type::Function {
-            params: vec![Type::UserDef("Transition".to_string())],
-            return_type: Box::new(Type::Float),
-        }),
-        "realize_gate" => Some(Type::Function {
-            params: vec![Type::ArchT, Type::StateT, Type::Gate],
-            return_type: Box::new(Type::Option(Box::new(Type::UserDef(
-                "GateRealization".to_string(),
-            )))),
-        }),
-        "get_transitions" => Some(Type::Function {
-            params: vec![Type::ArchT, Type::StateT],
-            return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))),
-        }),
-        "apply" => Some(Type::Function {
-            params: vec![Type::QubitMap, Type::UserDef("Transition".to_string())],
-            return_type: Box::new(Type::QubitMap),
-        }),
-        "routed_gates" => Some(Type::Vec(Box::new(Type::Gate))),
-        _ => None,
-    }
+/// There are user-defined structs, like Transition.
+/// This provides a single place to store information about these types.
+/// Then, the types of the fields of the user-defined types can be determined
+/// from here.
+#[derive(Debug)]
+pub struct UserDefTable {
+    /// maps from type names (like Transition) to their fields
+    map: HashMap<String, UserDefEntry>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Debug)]
+struct UserDefEntry {
+    fields: HashMap<String, Type>,
+}
 
-    #[test]
-    fn test_field_lookup() {
-        assert_eq!(field_lookup("total garbage"), None);
-        assert_eq!(
-            field_lookup("cost"),
-            Some(Type::Function {
-                params: vec![Type::UserDef("Transition".to_string())],
-                return_type: Box::new(Type::Float),
-            })
-        );
-        assert_eq!(
-            field_lookup("realize_gate"),
-            Some(Type::Function {
-                params: vec![Type::ArchT, Type::StateT, Type::Gate],
-                return_type: Box::new(Type::Option(Box::new(Type::UserDef(
-                    "GateRealization".to_string(),
-                )))),
-            })
-        );
-        assert_eq!(
-            field_lookup("get_transitions"),
-            Some(Type::Function {
-                params: vec![Type::ArchT, Type::StateT],
-                return_type: Box::new(Type::Vec(Box::new(Type::UserDef("Transition".to_string())))),
-            })
-        );
-        assert_eq!(
-            field_lookup("apply"),
-            Some(Type::Function {
-                params: vec![Type::QubitMap, Type::UserDef("Transition".to_string())],
-                return_type: Box::new(Type::QubitMap),
-            })
-        );
-        assert_eq!(
-            field_lookup("routed_gates"),
-            Some(Type::Vec(Box::new(Type::Gate)))
-        )
+impl UserDefTable {
+    /// Given an AmaroFile, creates a UserDefTable which determines the fields
+    /// of user-defined types.
+    pub fn new(file: &crate::ast::AmaroFile) -> Self {
+        let mut map: HashMap<String, UserDefEntry> = HashMap::new();
+
+        for block in &file.blocks {
+            let crate::ast::BlockContent::Fields(items) = &block.content;
+            items
+                .iter()
+                .filter_map(|elt| match elt {
+                    crate::ast::BlockItem::Field(_) => None,
+                    crate::ast::BlockItem::StructDef(struct_def) => Some(struct_def),
+                    crate::ast::BlockItem::ReturnKeyword { .. } => None,
+                })
+                .for_each(|struct_def| {
+                    let fields = struct_def
+                        .fields
+                        .iter()
+                        .map(|elt| {
+                            (
+                                elt.name.clone(),
+                                Type::from_type_annotation(&elt.type_annotation),
+                            )
+                        })
+                        .collect();
+                    map.insert(struct_def.name.clone(), UserDefEntry { fields });
+                })
+        }
+
+        UserDefTable { map }
+    }
+
+    /// Creates an empty UserDefTable. Useful if it is known that there are no
+    /// user-defined types, which really only happens for testing.
+    pub fn empty() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    /// Only used by tests
+    /// TODO: Make this only compile in tests
+    pub fn add(&mut self, name: String, fields: HashMap<String, Type>) {
+        self.map.insert(name, UserDefEntry { fields });
+    }
+
+    /// Gets the fields of a user-defined type, if the type has a definition.
+    ///
+    /// The returned value, if exists, is a map from field names (strings) to
+    /// their associated types.
+    pub fn get_fields(&self, identifier: &str) -> Option<&HashMap<String, Type>> {
+        self.map.get(identifier).map(|elt| &elt.fields)
     }
 }

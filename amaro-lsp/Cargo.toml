@@ -1,6 +1,6 @@
 [package]
 name = "amaro-lsp"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 description = "Language server for the Amaro quantum routing DSL"
 
@@ -10,3 +10,5 @@ tower-lsp = "0.20"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 nom = "7"
+strum = "0.28.0"
+strum_macros = "0.28.0"

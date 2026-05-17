@@ -9,6 +9,7 @@ use nom::{
 };
 
 use nom::error::Error;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use super::expr::parse_expr;
 use super::utils::calc_range;
@@ -154,14 +155,18 @@ fn parse_typed_param<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a
 }
 
 // Struct Definition
-fn parse_struct_def<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, StructDef> {
+fn parse_struct_def<'a>(
+    original_input: &'a str,
+    input: &'a str,
+    _diags: &mut Vec<Diagnostic>,
+) -> IResult<&'a str, StructDef> {
     let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
     let (input, name) = parse_identifier(input)?;
     let name_start = start;
     let name_end = input.as_ptr() as usize - original_input.as_ptr() as usize;
 
-    let (_, _) = peek(ws(char('{')))(input)?;
+    // let (_, _) = peek(ws(char('{')))(input)?;
 
     let (input, _) = ws(char('{'))(input)?;
     let (input, params) =
@@ -182,25 +187,65 @@ fn parse_struct_def<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a 
 }
 
 // Field & Block Parsing
-fn parse_field<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, Field> {
-    let (input, _) = whitespace_handler(input)?;
+fn parse_field<'a>(
+    original_input: &'a str,
+    input: &'a str,
+    diags: &mut Vec<Diagnostic>,
+) -> Result<(&'a str, Field), (&'a str, String)> {
+    let input = match whitespace_handler(input) {
+        Ok(r) => r.0,
+        Err(_) => {
+            return Err((
+                input,
+                "Issue with whitespace handler in field parsing.".to_string(),
+            ));
+        }
+    };
 
     let key_start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    let (input, key) = parse_non_keyword_identifier(input)?;
+    let (input, key) = match parse_non_keyword_identifier(input) {
+        Ok(r) => r,
+        Err(_) => {
+            return Err((
+                input,
+                "There was no identifier for the field, or it was a keyword".to_string(),
+            ));
+        }
+    };
     let key_len = key.len();
 
-    let (input, _) = ws(char('='))(input)?;
+    let input = match ws(char('='))(input) {
+        Ok(r) => r.0,
+        Err(_) => return Err((input, "Field had no =".to_string())),
+    };
 
     let val_start = input.as_ptr() as usize - original_input.as_ptr() as usize;
-    let (input, first_expr) = parse_expr(original_input, input)?;
+    let (input, first_expr) = match parse_expr(original_input, input, diags) {
+        Ok(r) => r,
+        Err(_) => {
+            return Err((
+                input,
+                "Could not parse expression in this field".to_string(),
+            ));
+        }
+    };
 
     // Check for comma-separated list (e.g., routed_gates = CX, T)
-    let (input, rest_exprs) = many0(|i: &'a str| {
+    let (input, rest_exprs) = match many0(|i: &'a str| {
         let (i, _) = whitespace_handler(i)?;
         let (i, _) = char(',')(i)?;
         let (i, _) = whitespace_handler(i)?;
-        parse_expr(original_input, i)
-    })(input)?;
+        parse_expr(original_input, i, diags)
+    })(input)
+    {
+        Ok(r) => r,
+        Err(_) => {
+            return Err((
+                input,
+                "Could not find a comma-separated list in this field.".to_string(),
+            ));
+        }
+    };
 
     // If there were commas, wrap everything into a List. Else just return the single expression.
     let value_expr = if rest_exprs.is_empty() {
@@ -228,24 +273,90 @@ fn parse_field<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, 
     ))
 }
 
+enum BlockItemType {
+    StructDef,
+    Field,
+}
+
+fn determine_block_item_type(input: &str) -> Option<BlockItemType> {
+    // let start = input.as_ptr() as usize - original_input.as_ptr() as usize;
+
+    let (input, _name) = match parse_identifier(input) {
+        Ok(p) => p,
+        Err(_) => return None, // no identifier, not either struct def nor field
+    };
+    // let name_start = start;
+    // let name_end = input.as_ptr() as usize - original_input.as_ptr() as usize;
+
+    if peek(ws(char('{')))(input).is_ok() {
+        return Some(BlockItemType::StructDef);
+    }
+
+    // if we get here, then we know that it's NOT struct def
+    // check if it's trying to be a field
+    if peek(ws(char('=')))(input).is_ok() {
+        return Some(BlockItemType::Field);
+    }
+
+    // neither struct def nor field, but something else. so none
+    None
+}
+
+/// Parses a block item. A block item is either a field or a struct def.
+/// On Ok, gives where the input has advanced to, along with the parsed block item.
+/// On Err, gives where the input should be advanced to, along with a String
+/// reason for the error.
 fn parse_block_item<'a>(
     original_input: &'a str,
     input: &'a str,
-) -> IResult<&'a str, Option<BlockItem>> {
-    let (input, _) = whitespace_handler(input)?;
+    diags: &mut Vec<Diagnostic>,
+) -> Result<(&'a str, BlockItem), (&'a str, String)> {
+    let input = match whitespace_handler(input) {
+        Ok(res) => res.0,
+        Err(_) => return Err((input, "Could not resolve whitespace".to_string())),
+    };
 
-    if let Ok((input, struct_def)) = parse_struct_def(original_input, input) {
-        return Ok((input, Some(BlockItem::StructDef(struct_def))));
+    // TODO in here, we need to identify whether it should be a struct def or
+    // a field, rather than trying both. then, we can report errors from the one
+    // that it ought to be.
+
+    match determine_block_item_type(input) {
+        Some(BlockItemType::StructDef) => match parse_struct_def(original_input, input, diags) {
+            Ok((input, struct_def)) => Ok((input, BlockItem::StructDef(struct_def))),
+            Err(_) => Err((
+                input,
+                "Could not finish parsing this struct def".to_string(),
+            )),
+        },
+        Some(BlockItemType::Field) => match parse_field(original_input, input, diags) {
+            Ok((input, field)) => Ok((input, BlockItem::Field(field))),
+            Err((rest, reason)) => {
+                Err((rest, format!("Could not parse field. Reason: {}", reason)))
+            }
+        },
+        None => Err((
+            input,
+            "This is neither a struct definition nor a field.".to_string(),
+        )),
     }
 
-    if let Ok((input, field)) = parse_field(original_input, input) {
-        return Ok((input, Some(BlockItem::Field(field))));
-    }
+    // if let Ok((input, struct_def)) = parse_struct_def(original_input, input) {
+    //     eprintln!("Block item parsed as struct def");
+    //     return Ok((input, Some(BlockItem::StructDef(struct_def))));
+    // }
 
-    Ok((input, None))
+    // if let Ok((input, field)) = parse_field(original_input, input) {
+    //     return Ok((input, Some(BlockItem::Field(field))))
+    // }
+
+    // Ok((input, None))
 }
 
-fn extract_block_items(original_input: &str, body_text: &str) -> Vec<BlockItem> {
+fn extract_block_items(
+    original_input: &str,
+    body_text: &str,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<BlockItem> {
     let mut items = Vec::new();
     let mut current_input = body_text;
 
@@ -281,21 +392,25 @@ fn extract_block_items(original_input: &str, body_text: &str) -> Vec<BlockItem> 
             }
         }
 
-        match parse_block_item(original_input, current_input) {
-            Ok((rest, Some(item))) => {
+        match parse_block_item(original_input, current_input, diags) {
+            Ok((rest, item)) => {
                 items.push(item);
                 current_input = rest;
             }
-            Ok((_rest, None)) => {
-                if let Some(pos) = current_input.find('\n') {
-                    current_input = &current_input[pos + 1..];
-                } else {
-                    break;
-                }
-            }
-            Err(_) => {
-                if let Some(pos) = current_input.find('\n') {
-                    current_input = &current_input[pos + 1..];
+            Err((rest, reason)) => {
+                if let Some(pos) = rest.find('\n') {
+                    current_input = &rest[pos + 1..];
+                    diags.push(Diagnostic {
+                        range: calc_range(
+                            original_input,
+                            rest.as_ptr() as usize - original_input.as_ptr() as usize,
+                            pos,
+                        ),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("Parser".to_string()),
+                        message: reason,
+                        ..Default::default()
+                    });
                 } else {
                     break;
                 }
@@ -346,7 +461,11 @@ pub fn consume_remaining_block(input: &str) -> IResult<&str, &str> {
     Ok((current, &input[..len]))
 }
 
-pub fn parse_block<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a str, Option<Block>> {
+pub fn parse_block<'a>(
+    original_input: &'a str,
+    input: &'a str,
+    diags: &mut Vec<Diagnostic>,
+) -> IResult<&'a str, Option<Block>> {
     let (input, _) = whitespace_handler(input)?;
     if input.is_empty() {
         return Ok((input, None));
@@ -363,7 +482,7 @@ pub fn parse_block<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a s
     if check_colon.is_ok() {
         let (input, _) = char(':')(input)?;
         let (input, body_content) = consume_remaining_block(input)?;
-        let items = extract_block_items(original_input, body_content);
+        let items = extract_block_items(original_input, body_content, diags);
 
         return Ok((
             input,
@@ -398,7 +517,7 @@ pub fn parse_block<'a>(original_input: &'a str, input: &'a str) -> IResult<&'a s
         }
 
         let inner_body = &original_input[body_start..body_end];
-        let items = extract_block_items(original_input, inner_body);
+        let items = extract_block_items(original_input, inner_body, diags);
 
         let remaining_input = &original_input[body_end..];
         let (input, _) = char(']')(remaining_input)?;
@@ -435,12 +554,18 @@ fn parse_function_type(input: &str) -> IResult<&str, TypeAnnotation> {
     ))
 }
 
-pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {
+pub struct ParseOutput {
+    pub file: AmaroFile,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+pub fn parse_file(input: &str) -> std::result::Result<ParseOutput, String> {
     // Commented since this was causing race condition in tests
     // reset_node_ids();
 
     let mut blocks = Vec::new();
     let mut current_input = input;
+    let mut parse_diagnostics = Vec::new();
 
     while !current_input.is_empty() {
         // Skip whitespace
@@ -452,7 +577,7 @@ pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {
             break;
         }
 
-        match parse_block(input, current_input) {
+        match parse_block(input, current_input, &mut parse_diagnostics) {
             Ok((rest, Some(block))) => {
                 blocks.push(block);
                 current_input = rest;
@@ -461,10 +586,17 @@ pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {
                 // Parsed successfully but got nothing. Advance
                 current_input = rest;
             }
-            Err(_) => {
+            Err(e) => {
+                let new_input = match e {
+                    nom::Err::Incomplete(_) => current_input,
+                    nom::Err::Error(next) => next.input,
+                    nom::Err::Failure(next) => next.input,
+                };
                 // Error recovery
-                if let Some(pos) = current_input.find('\n') {
-                    current_input = &current_input[pos + 1..];
+
+                // the error recovery method here is to silently move to next line
+                if let Some(pos) = new_input.find('\n') {
+                    current_input = &new_input[pos + 1..];
                 } else {
                     // Skip one character
                     let mut chars = current_input.chars();
@@ -478,5 +610,8 @@ pub fn parse_file(input: &str) -> std::result::Result<AmaroFile, String> {
         }
     }
 
-    Ok(AmaroFile::new(blocks))
+    Ok(ParseOutput {
+        file: AmaroFile::new(blocks),
+        diagnostics: parse_diagnostics,
+    })
 }

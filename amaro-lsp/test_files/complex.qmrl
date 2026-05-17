@@ -1,0 +1,33 @@
+RouteInfo:
+    routed_gates = CX
+    
+    GateRealization{path : Vec<Location>}
+    
+    realize_gate = 
+        if (Gate.gate_type()) == CX 
+        then 
+            map(|x| -> GateRealization{path = x},(let v = Vec() in
+            let v2 = v.push(Location(0)) in
+            let v3 = v.extend(v2) in
+            let popped = v3.pop() in
+            
+            all_paths(Arch, 
+                        vertical_neighbors(State.map[Gate.qubits[0]], 10, 10), 
+                        horizontal_neighbors(State.map[Gate.qubits[1]], 10), 
+                        Vec())))
+        else 
+            Vec()
+
+TransitionInfo:
+    Transition{na : Location}
+    
+    get_transitions = (Vec()).push(Transition{na=Location(0)})
+    
+    apply = identity_application(step)
+    cost = 0.0
+
+ArchInfo:
+    Arch{width : Int}
+
+StateInfo:
+    cost = 1.0

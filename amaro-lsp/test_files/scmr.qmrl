@@ -1,7 +1,8 @@
 RouteInfo:
     routed_gates = CX, T
     GateRealization{path : Vec<Location>}
-    realize_gate =  
+    info = map(|x| -> x, Arch.alg_qubits())
+    realize_gate = 
     if (Gate.gate_type()) == CX 
         then 
             map(|x| -> GateRealization{path = x}, 
@@ -32,6 +33,7 @@ TransitionInfo:
 ArchInfo:
     Arch{magic_state_qubits : Vec<Location>, alg_qubits : Vec<Location>, width : Int, height : Int}
     get_locations = Arch.alg_qubits()
+
 
 StateInfo:
     cost = 1.0
