@@ -55,7 +55,21 @@ TransitionInfo:
     cost = 1.0
 
 ArchInfo:
-    Arch{num_qpus : Int, qpu_sizes : Vec<Int>, qpu_ids : Vec<Int>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location>, n_comm_qubits : Int, bell_success_prob : Float, bell_attempt_interval : Float, max_bell_rate : Float, code_distance : Int, t_cycle : Float, gate_bell_budget : Int}
+    Arch{
+        num_qpus : Int,
+        qpu_sizes : Vec<Int>,
+        qpu_ids : Vec<Int>,
+        link_cost : Float,
+        comm_qubits : Vec<Location>,
+        alg_qubits : Vec<Location>,
+        n_comm_qubits : Int,
+        bell_success_prob : Float,
+        bell_attempt_interval : Float,
+        max_bell_rate : Float,
+        code_distance : Int,
+        t_cycle : Float,
+        gate_bell_budget : Int
+    }
     get_locations = Arch.alg_qubits()
 "#;
 

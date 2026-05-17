@@ -55,10 +55,30 @@ TransitionInfo:
 
 
 ArchInfo:
-    // qpu_ids is flat: index i stores Location(i)'s QPU id.
-    // gate_bell_budget is precomputed from the hardware fields for now. QMRL
-    // does not yet have floor/min/< operators.
-    Arch{num_qpus : Int, qpu_sizes : Vec<Int>, qpu_ids : Vec<Int>, link_cost : Float, comm_qubits : Vec<Location>, alg_qubits : Vec<Location>, n_comm_qubits : Int, bell_success_prob : Float, bell_attempt_interval : Float, max_bell_rate : Float, code_distance : Int, t_cycle : Float, gate_bell_budget : Int}
+    Arch{
+        // Multi-QPU topology fields
+        num_qpus : Int,
+        qpu_sizes : Vec<Int>,
+        qpu_ids : Vec<Int>,
+        link_cost : Float,
+        comm_qubits : Vec<Location>,
+        alg_qubits : Vec<Location>,
+
+        // Bell pair generation hardware parameters
+        n_comm_qubits : Int,
+        bell_success_prob : Float,
+        bell_attempt_interval : Float,
+        max_bell_rate : Float,
+        code_distance : Int,
+
+        // Researcher-chosen QEC cycle time (must exceed syndrome_demand / R_Bell).
+        // budget = floor(R_Bell × t_cycle) - syndrome_demand
+        t_cycle : Float,
+
+        // Precomputed from the hardware fields above for now. QMRL does not yet
+        // have floor/min/< operators, so the example keeps this as architecture data.
+        gate_bell_budget : Int
+    }
     get_locations = Arch.alg_qubits()
 
 

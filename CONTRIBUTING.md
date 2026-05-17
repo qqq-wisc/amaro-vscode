@@ -119,8 +119,8 @@ TransitionInfo:
     apply = []
     cost = 0.0
 "#;
-    let file = parse_file(input).unwrap();
-    let diags = check_semantics(&file);
+    let file = parse_file(input).unwrap().file;
+    let diags = check_semantics(&file).diagnostics;
     let errors: Vec<_> = diags.iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
         .collect();
@@ -159,8 +159,8 @@ TransitionInfo:
        apply = []
        cost = 0.0
    "#;
-       let file = parse_file(input).unwrap();
-       let diags = check_semantics(&file);
+       let file = parse_file(input).unwrap().file;
+       let diags = check_semantics(&file).diagnostics;
        assert!(diags.is_empty());
    }
    ```
